@@ -1,0 +1,91 @@
+│
+●  Nuxt 4.4.2 (with Nitro 2.13.3, Vite 7.3.2 and Vue 3.5.32)
+[get-port] Unable to find an available port (tried 5000 on host "localhost"). Using alternative port 3001.
+
+  ➜ Local:    http://localhost:3001/
+  ➜ Network:  use --host to expose
+
+  ➜ DevTools: press Shift + Option + D in the browser (v3.2.4)
+
+ℹ Nuxt Icon server bundle mode is set to local
+
+ WARN  Duplicated imports "useAppConfig", the one from "nitropack/runtime/internal/config" has been ignored and "/Users/chomnitchouy/Projects/pm-agents/frontend/node_modules/@nuxt/nitro-server/dist/runtime/utils/app-config" is used
+
+
+ WARN  Duplicated imports "useAppConfig", the one from "nitropack/runtime/internal/config" has been ignored and "/Users/chomnitchouy/Projects/pm-agents/frontend/node_modules/@nuxt/nitro-server/dist/runtime/utils/app-config" is used
+
+✔ Vite client built in 34ms
+✔ Vite server built in 44ms
+
+ WARN  Duplicated imports "useAppConfig", the one from "nitropack/runtime/internal/config" has been ignored and "/Users/chomnitchouy/Projects/pm-agents/frontend/node_modules/@nuxt/nitro-server/dist/runtime/utils/app-config" is used
+
+
+ WARN  Duplicated imports "useAppConfig", the one from "nitropack/runtime/internal/config" has been ignored and "/Users/chomnitchouy/Projects/pm-agents/frontend/node_modules/@nuxt/nitro-server/dist/runtime/utils/app-config" is used
+
+
+ WARN  Duplicated imports "useAppConfig", the one from "nitropack/runtime/internal/config" has been ignored and "/Users/chomnitchouy/Projects/pm-agents/frontend/node_modules/@nuxt/nitro-server/dist/runtime/utils/app-config" is used
+
+
+[nitro]  ERROR  RollupError: server/api/auth/callback.get.ts (2:9): "setUserSession" is not exported by "node_modules/nuxt-auth-utils/dist/runtime/types/index.js", imported by "server/api/auth/callback.get.ts".
+
+
+1: import { defineEventHandler, getCookie, sendRedirect } from 'h3'
+2: import { setUserSession } from '#auth-utils'
+            ^
+3: 
+4: export default defineEventHandler(async (event) => {
+
+
+ WARN  Duplicated imports "useAppConfig", the one from "nitropack/runtime/internal/config" has been ignored and "/Users/chomnitchouy/Projects/pm-agents/frontend/node_modules/@nuxt/nitro-server/dist/runtime/utils/app-config" is used
+
+
+[nitro]  ERROR  RollupError: server/api/auth/callback.get.ts (2:9): "setUserSession" is not exported by "node_modules/nuxt-auth-utils/dist/runtime/types/index.js", imported by "server/api/auth/callback.get.ts".
+
+
+1: import { defineEventHandler, getCookie, sendRedirect } from 'h3'
+2: import { setUserSession } from '#auth-utils'
+            ^
+3: 
+4: export default defineEventHandler(async (event) => {
+
+
+ WARN  Duplicated imports "useAppConfig", the one from "nitropack/runtime/internal/config" has been ignored and "/Users/chomnitchouy/Projects/pm-agents/frontend/node_modules/@nuxt/nitro-server/dist/runtime/utils/app-config" is used
+
+[nitro] ✔ Nuxt Nitro server built in 1671ms
+ℹ Vite server warmed up in 6ms
+ℹ Vite client warmed up in 16ms
+[nitro] ✔ Nuxt Nitro server built in 577ms
+[nitro] ✔ Nuxt Nitro server built in 687ms
+[nitro] ✔ Nuxt Nitro server built in 2810ms
+[nuxt] ℹ Compiled types/runtime-config.d.ts in 690.55ms
+[nitro] ✔ Nuxt Nitro server built in 2938ms
+[nitro] ✔ Nuxt Nitro server built in 1969ms
+[nuxt] ℹ Compiled router.options.mjs in 991.64ms
+[nuxt] ℹ Directory /Users/chomnitchouy/Projects/pm-agents/frontend/app/components/ created
+ℹ Restarting Nuxt...
+  ➜ DevTools: press Shift + Option + D in the browser (v3.2.4)
+
+ℹ Nuxt Icon server bundle mode is set to local
+✔ Nuxt Icon discovered local-installed 2 collections: heroicons, lucide
+
+ WARN  Duplicated imports "useAppConfig", the one from "nitropack/runtime/internal/config" has been ignored and "/Users/chomnitchouy/Projects/pm-agents/frontend/node_modules/@nuxt/nitro-server/dist/runtime/utils/app-config" is used
+
+
+ WARN  Duplicated imports "useAppConfig", the one from "nitropack/runtime/internal/config" has been ignored and "/Users/chomnitchouy/Projects/pm-agents/frontend/node_modules/@nuxt/nitro-server/dist/runtime/utils/app-config" is used
+
+✔ Vite client built in 115ms
+✔ Vite server built in 94ms
+
+ WARN  Duplicated imports "useAppConfig", the one from "nitropack/runtime/internal/config" has been ignored and "/Users/chomnitchouy/Projects/pm-agents/frontend/node_modules/@nuxt/nitro-server/dist/runtime/utils/app-config" is used
+
+
+ WARN  Duplicated imports "useAppConfig", the one from "nitropack/runtime/internal/config" has been ignored and "/Users/chomnitchouy/Projects/pm-agents/frontend/node_modules/@nuxt/nitro-server/dist/runtime/utils/app-config" is used
+
+
+ WARN  Duplicated imports "useAppConfig", the one from "nitropack/runtime/internal/config" has been ignored and "/Users/chomnitchouy/Projects/pm-agents/frontend/node_modules/@nuxt/nitro-server/dist/runtime/utils/app-config" is used
+
+[nitro] ✔ Nuxt Nitro server built in 11325ms
+ℹ Vite server warmed up in 46ms
+ℹ Vite client warmed up in 127ms
+[nuxt] ℹ Compiled plugins.client.mjs in 866.23ms
+[nuxt] ℹ Compiled types/plugins.d.ts in 962.48ms

@@ -1,0 +1,45 @@
+@import "tailwindcss";
+
+:root {
+  --color-bg:         #F5F4F1;
+  --color-sidebar:    #161616;
+  --color-card:       #FFFFFF;
+  --color-border:     #E8E6E0;
+  --color-text:       #1A1A1A;
+  --color-muted:      #6B6B6B;
+  --font-sans:        'DM Sans', sans-serif;
+  --font-mono:        'JetBrains Mono', monospace;
+}
+
+body {
+  font-family: var(--font-sans);
+  background-color: var(--color-bg);
+  color: var(--color-text);
+}
+
+.mono { font-family: var(--font-mono); }
+
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.animate-shimmer {
+  background: linear-gradient(90deg, #e5e7eb 25%, #f3f4f6 50%, #e5e7eb 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+}
+
+.line-clamp-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.line-clamp-3 {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
