@@ -48,6 +48,13 @@ export const findSessionByUserId = async (userId: string): Promise<TelegramSessi
   return rows.length ? mapSession(rows[0]) : null
 }
 
+export const findAllConnectedSessions = async (): Promise<TelegramSession[]> => {
+  const [rows] = await pool.query<SessionRow[]>(
+    "SELECT * FROM telegram_sessions WHERE status = 'connected'"
+  )
+  return rows.map(mapSession)
+}
+
 export const saveSession = async (
   userId: string,
   data: {
@@ -76,6 +83,13 @@ export const updateSessionString = async (userId: string, sessionString: string)
   await pool.query(
     'UPDATE telegram_sessions SET session_string = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?',
     [sessionString, userId]
+  )
+}
+
+export const markSessionDisconnected = async (userId: string): Promise<void> => {
+  await pool.query(
+    "UPDATE telegram_sessions SET status = 'disconnected', updated_at = CURRENT_TIMESTAMP WHERE user_id = ?",
+    [userId]
   )
 }
 

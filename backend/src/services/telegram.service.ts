@@ -6,8 +6,10 @@ import { StringSession } from 'telegram/sessions'
 import { Api } from 'telegram'
 import {
   findSessionByUserId,
+  findAllConnectedSessions,
   saveSession,
   deleteSession,
+  markSessionDisconnected,
   updateSessionString,
   upsertConversation,
   findConversationById,
@@ -29,6 +31,63 @@ const clients = new Map<string, TelegramClient>()
 const autoResponseAttached = new WeakSet<TelegramClient>()
 const autoResponseTimers = new Map<string, ReturnType<typeof setTimeout>>()
 
+// ─── Cooldown: at most 1 auto-reply per conversation per 60 s ────────────────
+const lastAutoReplyAt = new Map<string, number>()
+const AUTO_REPLY_COOLDOWN_MS = 15_000
+
+// ─── Conversation cache: avoid a DB hit on every incoming message ─────────────
+import type { TelegramConversation } from '../models/telegram.model'
+type ConvCacheEntry = { data: TelegramConversation[]; expiresAt: number }
+const convCache = new Map<string, ConvCacheEntry>()
+const CONV_CACHE_TTL_MS = 30_000
+
+const getCachedConversations = async (userId: string): Promise<TelegramConversation[]> => {
+  const entry = convCache.get(userId)
+  if (entry && Date.now() < entry.expiresAt) return entry.data
+  const data = await findConversationsByUserId(userId)
+  convCache.set(userId, { data, expiresAt: Date.now() + CONV_CACHE_TTL_MS })
+  return data
+}
+
+export const invalidateConvCache = (userId: string): void => {
+  convCache.delete(userId)
+}
+
+/**
+ * Sends a message with Telegram flood-wait protection.
+ * If Telegram returns FLOOD_WAIT, waits the required seconds then retries once.
+ * Returns true on success, false if the send ultimately failed.
+ */
+const sendWithFloodProtection = async (
+  client: TelegramClient,
+  peer: Api.TypeEntityLike,
+  message: string
+): Promise<boolean> => {
+  const trySend = async () => client.sendMessage(peer, { message })
+  try {
+    await trySend()
+    return true
+  } catch (err: any) {
+    const isFlood =
+      err?.errorMessage === 'FLOOD' ||
+      String(err?.message ?? '').includes('FLOOD_WAIT') ||
+      err?.seconds != null
+    if (isFlood) {
+      const waitSecs = Math.min(Number(err.seconds ?? 30), 60)
+      console.warn(`[auto-response] FLOOD_WAIT ${waitSecs}s — pausing before retry`)
+      await new Promise((r) => setTimeout(r, waitSecs * 1000))
+      try {
+        await trySend()
+        return true
+      } catch (retryErr) {
+        console.error('[auto-response] retry after flood wait failed:', retryErr)
+        return false
+      }
+    }
+    throw err
+  }
+}
+
 const handleAutoResponse = async (
   userId: string,
   client: TelegramClient,
@@ -40,23 +99,25 @@ const handleAutoResponse = async (
   // Resolve numeric peer ID from the incoming message
   const peerId = msg.peerId
   let numericPeerId: number | null = null
+  let isGroupMessage = false
   if (peerId instanceof Api.PeerUser) numericPeerId = Number(peerId.userId)
-  else if (peerId instanceof Api.PeerChat) numericPeerId = Number(peerId.chatId)
-  else if (peerId instanceof Api.PeerChannel) numericPeerId = Number(peerId.channelId)
+  else if (peerId instanceof Api.PeerChat) { numericPeerId = Number(peerId.chatId); isGroupMessage = true }
+  else if (peerId instanceof Api.PeerChannel) { numericPeerId = Number(peerId.channelId); isGroupMessage = true }
   if (!numericPeerId) return
 
-  console.log(`[auto-response] incoming message from peerId=${numericPeerId} for userId=${userId}`)
+  // In group / channel chats, only respond when the logged-in user is explicitly
+  // mentioned. Replying to every group message would be extremely spammy and
+  // could get the account flagged by Telegram.
+  if (isGroupMessage && !msg.mentioned) return
 
-  // Check if auto-response is enabled for this conversation
-  const conversations = await findConversationsByUserId(userId)
+  // Use cached conversation list — avoids a DB hit on every incoming message
+  const conversations = await getCachedConversations(userId)
   const conv = conversations.find(
     (c) => c.telegramPeerId === numericPeerId && c.autoResponse
   )
-  if (!conv) {
-    console.log(`[auto-response] no auto-response conversation found for peerId=${numericPeerId}`)
-    return
-  }
-  console.log(`[auto-response] triggered for conversation "${conv.peerName}" (${conv.id})`)
+  if (!conv) return
+
+  console.log(`[auto-response] triggered for "${conv.peerName}" — debouncing 2s`)
 
   // Debounce per conversation — wait 2 s after the last message before replying
   const timerKey = `${userId}:${conv.id}`
@@ -66,19 +127,41 @@ const handleAutoResponse = async (
   const timer = setTimeout(async () => {
     autoResponseTimers.delete(timerKey)
     try {
-      const [orgKnowledge, ...perProjectFeatures] = await Promise.all([
+      // ── 60-second cooldown: at most 1 auto-reply per conversation per minute ──
+      const lastReply = lastAutoReplyAt.get(conv.id) ?? 0
+      if (Date.now() - lastReply < AUTO_REPLY_COOLDOWN_MS) {
+        console.log(`[auto-response] cooldown active for "${conv.peerName}", skipping`)
+        return
+      }
+
+      // Load org knowledge and project knowledge in parallel.
+      // Project features are only fetched for the projects selected for this conversation.
+      const [orgKnowledge, projectFeatures] = await Promise.all([
         getOrgKnowledge(),
-        ...conv.projectIds.map((pid) => getProjectKnowledge(pid)),
+        conv.projectIds.length
+          ? Promise.all(conv.projectIds.map((pid) => getProjectKnowledge(pid))).then((r) => r.flat())
+          : Promise.resolve([]),
       ])
-      const projectFeatures = perProjectFeatures.flat()
 
       const orgText = orgKnowledge
         .map((item) => `--- ${item.title} (${item.category}) ---\n${item.content}`)
         .join('\n\n')
 
       const featureText = projectFeatures
-        .map((f) => `--- ${(f as any).name} [${(f as any).status}] ---\n${(f as any).description}`)
+        .map((f: any) => {
+          const lines = [
+            `--- ${f.name} [${f.status}] ---`,
+            `Category: ${f.category}`,
+            f.description   ? `Description: ${f.description}`           : null,
+            f.functionality ? `Functionality: ${f.functionality}`        : null,
+            f.userRoles?.length   ? `User Roles: ${f.userRoles.join(', ')}`     : null,
+            f.integrations?.length ? `Integrations: ${f.integrations.join(', ')}` : null,
+          ]
+          return lines.filter(Boolean).join('\n')
+        })
         .join('\n\n')
+
+      const hasKnowledge = !!(orgText || featureText)
 
       const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
       const recentMessages = await findRecentMessagesByConversationId(conv.id, since, 20)
@@ -88,13 +171,21 @@ const handleAutoResponse = async (
         .join('\n')
 
       const systemPrompt =
-        `You are an AI assistant sending automatic Telegram replies on behalf of the user.\n\n` +
+        `You are an AI assistant that automatically replies to Telegram messages on behalf of the user.\n\n` +
+        `STRICT RULE: Answer using ONLY the knowledge provided below. ` +
+        `Do not use any general knowledge or information from your training data. ` +
+        `If the question cannot be answered from the provided knowledge base, reply politely that you don't have that information — ` +
+        `for example: "I'm sorry, I don't have information on that topic."\n\n` +
         (conv.customInstruction ? `[INSTRUCTION]\n${conv.customInstruction}\n\n` : '') +
-        (orgText ? `[ORGANIZATIONAL KNOWLEDGE]\n${orgText}\n\n` : '') +
-        (featureText ? `[PROJECT FEATURES]\n${featureText}\n\n` : '') +
+        (orgText    ? `[ORGANIZATIONAL KNOWLEDGE]\n${orgText}\n\n`    : '') +
+        (featureText ? `[PROJECT KNOWLEDGE]\n${featureText}\n\n`       : '') +
+        (!hasKnowledge
+          ? `[NOTE] No knowledge base is configured for this conversation. ` +
+            `Politely tell the sender you don't have information to help with their query.\n\n`
+          : '') +
         (historyText ? `[RECENT CONVERSATION]\n${historyText}\n\n` : '') +
-        `[LATEST MESSAGE FROM ${conv.peerName}]\n${msg.message}\n\n` +
-        `Reply naturally and concisely. Output ONLY the reply text, no preamble.`
+        `[MESSAGE FROM ${conv.peerName}]\n${msg.message}\n\n` +
+        `Output ONLY the reply text. No preamble, no labels, no explanation.`
 
       // Re-load .env with override so the key is available even if the shell
       // had the var set to empty string before the process started.
@@ -116,11 +207,27 @@ const handleAutoResponse = async (
         response.content[0].type === 'text' ? response.content[0].text.trim() : null
       if (!replyText) return
 
+      // ── Send with flood-wait protection ───────────────────────────────────────
       const peer = makePeer(conv.telegramPeerId, conv.peerType)
-      await client.sendMessage(peer, { message: replyText })
+      const sent = await sendWithFloodProtection(client, peer, replyText)
+      if (!sent) return
 
-      // Sync the sent message into the DB so it appears in the UI
-      await syncMessages(userId, conv.id, 5)
+      // Record the reply time for cooldown tracking
+      lastAutoReplyAt.set(conv.id, Date.now())
+      console.log(`[auto-response] sent reply to "${conv.peerName}"`)
+
+      // ── Persist reply to DB without an extra Telegram round-trip ─────────────
+      // We already have the message in memory — no need to call getMessages again.
+      await upsertMessage(conv.id, {
+        telegramMessageId: 0,   // 0 = placeholder; overwritten on next real sync
+        isOutgoing: true,
+        senderName: null,
+        text: replyText,
+        mediaType: 'none',
+        mediaMime: null,
+        telegramMediaId: null,
+        sentAt: new Date(),
+      })
     } catch (err) {
       console.error('[auto-response] error:', err)
     }
@@ -161,6 +268,9 @@ export const getClient = async (userId: string): Promise<TelegramClient> => {
   await client.connect()
 
   if (!(await client.isUserAuthorized())) {
+    // Mark disconnected in DB so the next GET /status call returns { connected: false }
+    // and the frontend shows the QR re-connect screen automatically.
+    await markSessionDisconnected(userId)
     throw new Error('Telegram session expired')
   }
 
@@ -321,44 +431,63 @@ const upsertTelegramMessage = async (
   })
 }
 
+// ─── Full-history concurrency guard ──────────────────────────────────────────
+// Prevents multiple simultaneous syncs for the same conversation (e.g. user
+// opens the same chat twice in quick succession). Each entry is conversationId.
+const syncFullHistoryRunning = new Set<string>()
+
 export const syncFullHistory = async (userId: string, conversationId: string): Promise<void> => {
-  const client = await getClient(userId)
-  const conversation = await findConversationById(conversationId)
-  if (!conversation) throw new Error('Conversation not found')
+  // Skip if a sync is already in progress for this conversation.
+  if (syncFullHistoryRunning.has(conversationId)) {
+    console.log(`[syncFullHistory] already running for ${conversationId}, skipping`)
+    return
+  }
+  syncFullHistoryRunning.add(conversationId)
 
-  const peer = makePeer(conversation.telegramPeerId, conversation.peerType)
-  const since = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000)
-  const batchSize = 100
-  const maxTotal = 500
+  try {
+    const client = await getClient(userId)
+    const conversation = await findConversationById(conversationId)
+    if (!conversation) throw new Error('Conversation not found')
 
-  let offsetId = 0
-  let totalFetched = 0
-  let reachedCutoff = false
+    const peer = makePeer(conversation.telegramPeerId, conversation.peerType)
+    const since = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000)
+    const batchSize = 100
+    const maxTotal = 500
 
-  while (!reachedCutoff && totalFetched < maxTotal) {
-    const batch = await client.getMessages(peer, {
-      limit: batchSize,
-      ...(offsetId ? { offsetId } : {}),
-    })
+    let offsetId = 0
+    let totalFetched = 0
+    let reachedCutoff = false
 
-    if (!batch.length) break
+    while (!reachedCutoff && totalFetched < maxTotal) {
+      const batch = await client.getMessages(peer, {
+        limit: batchSize,
+        ...(offsetId ? { offsetId } : {}),
+      })
 
-    for (const msg of batch) {
-      if (!(msg instanceof Api.Message)) continue
-      const msgDate = new Date((msg.date ?? 0) * 1000)
-      if (msgDate < since) {
-        reachedCutoff = true
-        break
+      if (!batch.length) break
+
+      for (const msg of batch) {
+        if (!(msg instanceof Api.Message)) continue
+        const msgDate = new Date((msg.date ?? 0) * 1000)
+        if (msgDate < since) {
+          reachedCutoff = true
+          break
+        }
+        await upsertTelegramMessage(conversationId, client, msg)
+        totalFetched++
       }
-      await upsertTelegramMessage(conversationId, client, msg)
-      totalFetched++
-    }
 
-    // offsetId for next page = ID of the oldest message in this batch
-    const validBatch = batch.filter((m): m is Api.Message => m instanceof Api.Message)
-    const oldestMsg = validBatch[validBatch.length - 1]
-    if (!oldestMsg || reachedCutoff) break
-    offsetId = oldestMsg.id
+      // offsetId for next page = ID of the oldest message in this batch
+      const validBatch = batch.filter((m): m is Api.Message => m instanceof Api.Message)
+      const oldestMsg = validBatch[validBatch.length - 1]
+      if (!oldestMsg || reachedCutoff) break
+      offsetId = oldestMsg.id
+
+      // Pace batch requests so we don't burst 5 getMessages calls back-to-back.
+      await new Promise((r) => setTimeout(r, 300))
+    }
+  } finally {
+    syncFullHistoryRunning.delete(conversationId)
   }
 }
 
@@ -380,20 +509,38 @@ export const syncMessages = async (
   }
 }
 
+// ─── Entity name cache ────────────────────────────────────────────────────────
+// Keyed by string senderId. Persists for the server lifetime so the same sender
+// is never resolved more than once, regardless of how many syncs run.
+// Stores null for senders whose name couldn't be resolved (avoids retrying).
+const entityNameCache = new Map<string, string | null>()
+
 const resolveSenderName = async (
   client: TelegramClient,
   msg: Api.Message
 ): Promise<string | null> => {
+  // Outgoing messages are always from the logged-in user — no API call needed.
+  if (msg.out) return null
+  if (!msg.senderId) return null
+
+  const key = String(msg.senderId)
+
+  // Return cached result (including null) without hitting Telegram.
+  if (entityNameCache.has(key)) return entityNameCache.get(key) ?? null
+
   try {
-    if (!msg.senderId) return null
     const sender = await client.getEntity(msg.senderId)
-    if (sender instanceof Api.User) {
-      return [sender.firstName, sender.lastName].filter(Boolean).join(' ') || null
-    }
+    const name =
+      sender instanceof Api.User
+        ? [sender.firstName, sender.lastName].filter(Boolean).join(' ') || null
+        : null
+    entityNameCache.set(key, name)
+    return name
   } catch {
-    // ignore
+    // Cache null so we don't retry a failing entity on the next sync.
+    entityNameCache.set(key, null)
+    return null
   }
-  return null
 }
 
 export const sendMessage = async (
@@ -489,4 +636,23 @@ export const downloadMedia = async (
   const mime = dbMsg.mediaMime || 'application/octet-stream'
 
   return { buffer, mime }
+}
+
+// ─── Startup reconnection ─────────────────────────────────────────────────────
+// Called once on server boot. Re-establishes Telegram connections for every
+// user whose session is marked connected in the DB, so auto-response resumes
+// immediately without anyone needing to open the browser.
+export const reconnectAllSessions = async (): Promise<void> => {
+  const sessions = await findAllConnectedSessions()
+  if (!sessions.length) return
+  console.log(`[startup] Reconnecting ${sessions.length} Telegram session(s)...`)
+  for (const s of sessions) {
+    try {
+      await getClient(s.userId)
+      console.log(`[startup] ✓ Reconnected user ${s.userId} (${s.telegramUsername ?? s.phoneNumber ?? 'unknown'})`)
+    } catch (err) {
+      // Session may be expired — getClient already marks it disconnected in DB.
+      console.warn(`[startup] ✗ Could not reconnect user ${s.userId}:`, err instanceof Error ? err.message : err)
+    }
+  }
 }

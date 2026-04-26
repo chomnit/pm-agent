@@ -14,6 +14,7 @@ import stageRoutes from './routes/stage.routes'
 import ticketRoutes from './routes/ticket.routes'
 import userRoutes from './routes/user.routes'
 import telegramRoutes from './routes/telegram.routes'
+import { reconnectAllSessions } from './services/telegram.service'
 
 dotenv.config()
 
@@ -84,5 +85,12 @@ app.listen(port, async () => {
   } catch (err) {
     console.warn('Could not reset orphaned running stages:', err)
   }
+
+  // Re-establish Telegram connections for all users who were connected before
+  // the server restarted, so auto-response resumes without browser interaction.
+  reconnectAllSessions().catch((err) => {
+    console.warn('reconnectAllSessions error:', err)
+  })
+
   console.log(`Backend API listening on http://localhost:${port}`)
 })

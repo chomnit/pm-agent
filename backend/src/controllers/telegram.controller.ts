@@ -182,6 +182,10 @@ export const patchConversationConfig = async (req: Request, res: Response) => {
     autoResponse: Boolean(autoResponse),
   })
 
+  // Invalidate the in-memory conversation cache so the auto-response handler
+  // picks up the new settings immediately (within the 30-second TTL window).
+  tg.invalidateConvCache(userId)
+
   return res.json({ ok: true })
 }
 

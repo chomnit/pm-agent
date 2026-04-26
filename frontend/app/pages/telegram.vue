@@ -509,7 +509,12 @@ const fetchStatus = async () => {
   try {
     const data = await $fetch<TelegramStatus>(`${base}/api/telegram/status`, { credentials: 'include' })
     status.value = data
-  } catch {
+  } catch (err: any) {
+    // 401 = app session expired → send back to login, not the Telegram QR screen
+    if (err?.response?.status === 401 || err?.status === 401) {
+      await navigateTo('/login')
+      return
+    }
     status.value = { connected: false }
   }
 }
@@ -705,8 +710,15 @@ const loadConversations = async () => {
   try {
     const res = await $fetch<{ data: TelegramConversation[] }>(`${base}/api/telegram/conversations`, { credentials: 'include' })
     conversations.value = res.data
-  } catch {
-    // ignore
+  } catch (err: any) {
+    if (err?.response?.status === 401 || err?.status === 401) {
+      await navigateTo('/login')
+      return
+    }
+    // Any other failure (e.g. Telegram session expired) — re-check connection status.
+    // The backend marks the session as disconnected before throwing, so this
+    // re-fetch will return { connected: false } and show the QR screen.
+    await fetchStatus()
   } finally {
     convsLoading.value = false
   }
