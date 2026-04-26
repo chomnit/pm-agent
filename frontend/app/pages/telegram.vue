@@ -89,34 +89,68 @@
             </div>
           </div>
 
-          <div v-else-if="filteredConvs.length === 0" class="p-6 text-center text-sm" style="color: var(--color-muted)">
-            No conversations found
-          </div>
+          <template v-else>
+            <div v-if="filteredConvs.length === 0 && contactResults.length === 0 && !contactSearchLoading" class="p-6 text-center text-sm" style="color: var(--color-muted)">
+              No conversations found
+            </div>
 
-          <button
-            v-for="conv in filteredConvs"
-            :key="conv.id"
-            class="w-full flex items-center gap-3 px-3 py-3 hover:bg-gray-50 transition-colors text-left border-b"
-            :class="selectedConv?.id === conv.id ? 'bg-violet-50 border-l-2 border-l-violet-500' : ''"
-            style="border-color: var(--color-border)"
-            @click="selectConversation(conv)"
-          >
-            <!-- Avatar -->
-            <div class="w-10 h-10 rounded-full flex-shrink-0 flex items-center justify-center text-sm font-semibold text-white"
-              :class="peerColor(conv.peerType)"
+            <button
+              v-for="conv in filteredConvs"
+              :key="conv.id"
+              class="w-full flex items-center gap-3 px-3 py-3 hover:bg-gray-50 transition-colors text-left border-b"
+              :class="selectedConv?.id === conv.id ? 'bg-violet-50 border-l-2 border-l-violet-500' : ''"
+              style="border-color: var(--color-border)"
+              @click="selectConversation(conv)"
             >
-              {{ conv.peerName[0]?.toUpperCase() }}
-            </div>
-            <div class="flex-1 min-w-0">
-              <div class="flex items-center justify-between">
-                <span class="text-sm font-medium truncate" style="color: var(--color-text)">{{ conv.peerName }}</span>
-                <span v-if="conv.unreadCount > 0" class="ml-1 flex-shrink-0 min-w-[1.25rem] h-5 rounded-full bg-violet-600 text-white text-xs flex items-center justify-center px-1">
-                  {{ conv.unreadCount }}
-                </span>
+              <div class="w-10 h-10 rounded-full flex-shrink-0 flex items-center justify-center text-sm font-semibold text-white"
+                :class="peerColor(conv.peerType)"
+              >
+                {{ conv.peerName[0]?.toUpperCase() }}
               </div>
-              <p class="text-xs truncate mt-0.5" style="color: var(--color-muted)">{{ conv.lastMessage || 'No messages yet' }}</p>
+              <div class="flex-1 min-w-0">
+                <div class="flex items-center justify-between">
+                  <span class="text-sm font-medium truncate" style="color: var(--color-text)">{{ conv.peerName }}</span>
+                  <span v-if="conv.unreadCount > 0" class="ml-1 flex-shrink-0 min-w-[1.25rem] h-5 rounded-full bg-violet-600 text-white text-xs flex items-center justify-center px-1">
+                    {{ conv.unreadCount }}
+                  </span>
+                </div>
+                <p class="text-xs truncate mt-0.5" style="color: var(--color-muted)">{{ conv.lastMessage || 'No messages yet' }}</p>
+              </div>
+            </button>
+
+            <!-- Contact search loading -->
+            <div v-if="contactSearchLoading" class="px-4 py-3 flex items-center gap-2 text-xs border-t" style="color: var(--color-muted); border-color: var(--color-border)">
+              <Icon name="heroicons:arrow-path" class="w-3.5 h-3.5 animate-spin" />
+              Searching Telegram...
             </div>
-          </button>
+
+            <!-- Global contact results -->
+            <template v-if="contactResults.length > 0">
+              <div class="px-3 py-2 text-xs font-semibold uppercase tracking-wide border-t" style="color: var(--color-muted); border-color: var(--color-border)">
+                Telegram Contacts
+              </div>
+              <button
+                v-for="contact in contactResults"
+                :key="contact.peerId"
+                class="w-full flex items-center gap-3 px-3 py-3 hover:bg-gray-50 transition-colors text-left border-b"
+                style="border-color: var(--color-border)"
+                @click="openContact(contact)"
+              >
+                <div class="w-10 h-10 rounded-full flex-shrink-0 flex items-center justify-center text-sm font-semibold text-white"
+                  :class="peerColor(contact.peerType)"
+                >
+                  {{ contact.peerName[0]?.toUpperCase() }}
+                </div>
+                <div class="flex-1 min-w-0">
+                  <span class="text-sm font-medium truncate block" style="color: var(--color-text)">{{ contact.peerName }}</span>
+                  <p class="text-xs truncate mt-0.5" style="color: var(--color-muted)">
+                    {{ contact.peerUsername ? '@' + contact.peerUsername : contact.peerType }}
+                  </p>
+                </div>
+                <Icon name="heroicons:plus-circle" class="w-4 h-4 flex-shrink-0 text-violet-400" />
+              </button>
+            </template>
+          </template>
         </div>
       </div>
 
@@ -134,10 +168,16 @@
             >
               {{ selectedConv.peerName[0]?.toUpperCase() }}
             </div>
-            <div>
-              <p class="text-sm font-semibold" style="color: var(--color-text)">{{ selectedConv.peerName }}</p>
+            <div class="flex-1 min-w-0">
+              <p class="text-sm font-semibold truncate" style="color: var(--color-text)">{{ selectedConv.peerName }}</p>
               <p v-if="selectedConv.peerUsername" class="text-xs" style="color: var(--color-muted)">@{{ selectedConv.peerUsername }}</p>
             </div>
+            <button
+              class="flex-shrink-0 text-sm font-medium text-violet-600 hover:text-violet-700 transition-colors"
+              @click="openSettings"
+            >
+              Setting
+            </button>
           </div>
 
           <!-- Messages -->
@@ -253,22 +293,15 @@
 
       <!-- Right: AI Agent Panel -->
       <div class="w-80 flex-shrink-0 flex flex-col border-l overflow-hidden" style="background: var(--color-card); border-color: var(--color-border)">
+
+        <!-- AI Agent header -->
         <div class="flex-shrink-0 px-4 py-3 border-b" style="border-color: var(--color-border)">
-          <div class="flex items-center gap-2 mb-3">
+          <div class="flex items-center gap-2">
             <div class="w-6 h-6 rounded-lg bg-violet-100 flex items-center justify-center">
               <Icon name="heroicons:cpu-chip" class="w-3.5 h-3.5 text-violet-600" />
             </div>
             <span class="text-sm font-semibold" style="color: var(--color-text)">AI Agent</span>
           </div>
-
-          <select
-            v-model="selectedProjectId"
-            class="w-full px-3 py-2 rounded-lg border text-sm outline-none"
-            style="border-color: var(--color-border); color: var(--color-text); background: var(--color-bg)"
-          >
-            <option value="">No project context</option>
-            <option v-for="p in projects" :key="p.id" :value="p.id">{{ p.name }}</option>
-          </select>
         </div>
 
         <!-- Agent chat messages -->
@@ -351,6 +384,108 @@
       </div>
     </div>
   </div>
+
+  <!-- Contact Settings Modal -->
+  <Teleport to="body">
+    <div
+      v-if="showSettings"
+      class="fixed inset-0 z-50 flex items-center justify-center p-4"
+      style="background: rgba(0,0,0,0.45)"
+      @click.self="showSettings = false"
+    >
+      <div class="w-full max-w-md rounded-2xl shadow-xl overflow-hidden" style="background: var(--color-card)">
+        <!-- Modal header -->
+        <div class="flex items-start justify-between px-6 py-4 border-b" style="border-color: var(--color-border)">
+          <div>
+            <h2 class="text-sm font-semibold" style="color: var(--color-text)">Contact Settings</h2>
+            <p class="text-xs mt-0.5" style="color: var(--color-muted)">
+              {{ selectedConv?.peerName }}
+              <span v-if="selectedConv?.peerUsername"> · @{{ selectedConv?.peerUsername }}</span>
+            </p>
+          </div>
+          <button class="text-gray-400 hover:text-gray-600 transition-colors" @click="showSettings = false">
+            <Icon name="heroicons:x-mark" class="w-5 h-5" />
+          </button>
+        </div>
+
+        <!-- Modal body -->
+        <div class="px-6 py-5 space-y-5">
+          <!-- Projects checklist -->
+          <div>
+            <label class="block text-xs font-semibold mb-2" style="color: var(--color-text)">Projects</label>
+            <div class="space-y-1.5 max-h-44 overflow-y-auto pr-1">
+              <label
+                v-for="p in projects"
+                :key="p.id"
+                class="flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer transition-colors hover:bg-gray-50"
+                :class="settingsForm.projectIds.includes(p.id) ? 'bg-violet-50' : ''"
+              >
+                <input
+                  type="checkbox"
+                  class="w-4 h-4 rounded accent-violet-600 cursor-pointer"
+                  :checked="settingsForm.projectIds.includes(p.id)"
+                  @change="toggleProject(p.id)"
+                />
+                <span class="text-sm" style="color: var(--color-text)">{{ p.name }}</span>
+              </label>
+              <p v-if="projects.length === 0" class="text-xs px-3 py-2" style="color: var(--color-muted)">No projects available</p>
+            </div>
+          </div>
+
+          <!-- Auto Response -->
+          <div class="flex items-center justify-between">
+            <div>
+              <p class="text-sm font-medium" style="color: var(--color-text)">Auto Response</p>
+              <p class="text-xs mt-0.5" style="color: var(--color-muted)">AI replies automatically to incoming messages</p>
+            </div>
+            <button
+              class="relative inline-flex h-6 w-11 flex-shrink-0 rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none"
+              :class="settingsForm.autoResponse ? 'bg-violet-600' : 'bg-gray-200'"
+              @click="settingsForm.autoResponse = !settingsForm.autoResponse"
+            >
+              <span
+                class="pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow transform transition-transform duration-200"
+                :class="settingsForm.autoResponse ? 'translate-x-5' : 'translate-x-0'"
+              />
+            </button>
+          </div>
+
+          <!-- Instruction -->
+          <div>
+            <label class="block text-xs font-semibold mb-2" style="color: var(--color-text)">Instruction</label>
+            <textarea
+              v-model="settingsForm.instruction"
+              rows="4"
+              placeholder="e.g. Always reply in Khmer, keep it short and friendly..."
+              class="w-full px-3 py-2.5 rounded-lg border text-sm outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100 resize-none"
+              style="border-color: var(--color-border); color: var(--color-text); background: var(--color-bg)"
+            />
+          </div>
+        </div>
+
+        <!-- Modal footer -->
+        <div class="px-6 py-4 border-t" style="border-color: var(--color-border); background: var(--color-bg)">
+          <p v-if="settingsError" class="text-xs text-red-500 mb-3">{{ settingsError }}</p>
+          <div class="flex items-center justify-end gap-3">
+          <button
+            class="px-4 py-2 text-sm rounded-lg border transition-colors hover:bg-gray-50"
+            style="border-color: var(--color-border); color: var(--color-muted)"
+            @click="showSettings = false"
+          >
+            Cancel
+          </button>
+          <button
+            :disabled="settingsSaving"
+            class="px-4 py-2 text-sm font-medium rounded-lg bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50 transition-colors"
+            @click="saveSettings"
+          >
+            {{ settingsSaving ? 'Saving…' : 'Save' }}
+          </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </Teleport>
 </template>
 
 <script setup lang="ts">
@@ -437,6 +572,9 @@ interface TelegramConversation {
   peerUsername: string | null
   lastMessage: string | null
   unreadCount: number
+  customInstruction: string | null
+  projectIds: string[]
+  autoResponse: boolean
   updatedAt: string
 }
 
@@ -445,11 +583,122 @@ const convsLoading = ref(false)
 const convSearch = ref('')
 const selectedConv = ref<TelegramConversation | null>(null)
 
-const filteredConvs = computed(() =>
-  conversations.value.filter((c) =>
-    c.peerName.toLowerCase().includes(convSearch.value.toLowerCase())
+const filteredConvs = computed(() => {
+  const q = convSearch.value.toLowerCase()
+  if (!q) return conversations.value
+  return conversations.value.filter((c) =>
+    c.peerName.toLowerCase().includes(q) ||
+    (c.peerUsername?.toLowerCase().includes(q))
   )
-)
+})
+
+interface ContactResult {
+  peerId: number
+  peerType: 'user' | 'group' | 'channel'
+  peerName: string
+  peerUsername: string | null
+}
+
+const contactResults = ref<ContactResult[]>([])
+const contactSearchLoading = ref(false)
+let searchTimer: ReturnType<typeof setTimeout> | null = null
+
+watch(convSearch, (q) => {
+  if (searchTimer) clearTimeout(searchTimer)
+  if (q.trim().length < 2) {
+    contactResults.value = []
+    contactSearchLoading.value = false
+    return
+  }
+  contactSearchLoading.value = true
+  searchTimer = setTimeout(async () => {
+    try {
+      const res = await $fetch<{ data: ContactResult[] }>(
+        `${base}/api/telegram/contacts/search?q=${encodeURIComponent(q.trim())}`,
+        { credentials: 'include' }
+      )
+      contactResults.value = res.data
+    } catch {
+      contactResults.value = []
+    } finally {
+      contactSearchLoading.value = false
+    }
+  }, 400)
+})
+
+const openContact = async (contact: ContactResult) => {
+  try {
+    const res = await $fetch<{ data: TelegramConversation }>(
+      `${base}/api/telegram/conversations/open`,
+      {
+        method: 'POST',
+        credentials: 'include',
+        body: {
+          peerId: contact.peerId,
+          peerType: contact.peerType,
+          peerName: contact.peerName,
+          peerUsername: contact.peerUsername,
+        },
+      }
+    )
+    const exists = conversations.value.find((c) => c.telegramPeerId === contact.peerId)
+    if (!exists) conversations.value = [res.data, ...conversations.value]
+    convSearch.value = ''
+    contactResults.value = []
+    await selectConversation(res.data)
+  } catch {
+    // ignore
+  }
+}
+
+// ─── Contact Settings Modal ───────────────────────────────────────────────────
+
+const showSettings = ref(false)
+const settingsForm = reactive({ instruction: '', projectIds: [] as string[], autoResponse: false })
+const settingsSaving = ref(false)
+const settingsError = ref('')
+
+const openSettings = () => {
+  settingsForm.instruction  = selectedConv.value?.customInstruction ?? ''
+  settingsForm.projectIds   = [...(selectedConv.value?.projectIds ?? [])]
+  settingsForm.autoResponse = selectedConv.value?.autoResponse ?? false
+  settingsError.value = ''
+  showSettings.value = true
+}
+
+const toggleProject = (id: string) => {
+  const idx = settingsForm.projectIds.indexOf(id)
+  if (idx === -1) settingsForm.projectIds.push(id)
+  else settingsForm.projectIds.splice(idx, 1)
+}
+
+const saveSettings = async () => {
+  if (!selectedConv.value) return
+  settingsSaving.value = true
+  try {
+    await $fetch(`${base}/api/telegram/conversations/${selectedConv.value.id}/config`, {
+      method: 'PATCH',
+      credentials: 'include',
+      body: {
+        customInstruction: settingsForm.instruction.trim() || null,
+        projectIds: settingsForm.projectIds,
+        autoResponse: settingsForm.autoResponse,
+      },
+    })
+    selectedConv.value = {
+      ...selectedConv.value,
+      customInstruction: settingsForm.instruction.trim() || null,
+      projectIds: [...settingsForm.projectIds],
+      autoResponse: settingsForm.autoResponse,
+    }
+    showSettings.value = false
+  } catch (err: any) {
+    console.error('saveSettings error:', err?.data || err)
+    settingsError.value = err?.data?.details || err?.data?.error || err?.message || 'Failed to save. Please try again.'
+  } finally {
+    settingsSaving.value = false
+  }
+}
 
 const loadConversations = async () => {
   convsLoading.value = true
@@ -632,8 +881,42 @@ const sendReply = async () => {
   }
 }
 
+const extractDraftBody = (text: string): string => {
+  const lines = text.split('\n')
+
+  // Strip leading preamble line if it ends with ":" (e.g. "Here's a draft message to X:")
+  let start = 0
+  if (lines[0]?.trim().endsWith(':')) {
+    start = 1
+    while (start < lines.length && lines[start].trim() === '') start++
+  }
+
+  // Strip trailing meta-comment lines (AI sign-offs / instructions)
+  const trailingPatterns = [
+    /^feel free/i,
+    /^let me know/i,
+    /^you can (adjust|modify|change|edit|shorten|tweak)/i,
+    /^please (feel free|let me know|adjust)/i,
+    /^hope this/i,
+    /^note:/i,
+    /^i('ve| have) (drafted|written|prepared)/i,
+  ]
+
+  let end = lines.length
+  while (end > start) {
+    const trimmed = lines[end - 1].trim()
+    if (trimmed === '' || trailingPatterns.some((p) => p.test(trimmed))) {
+      end--
+    } else {
+      break
+    }
+  }
+
+  return lines.slice(start, end).join('\n').trim()
+}
+
 const useAsReply = (text: string) => {
-  replyText.value = convertToTelegramHtml(text)
+  replyText.value = convertToTelegramHtml(extractDraftBody(text))
   replyIsFormatted.value = true
 }
 
@@ -646,7 +929,6 @@ const agentInput = ref('')
 const agentStreaming = ref(false)
 const agentStreamBuffer = ref('')
 const agentMessagesEl = ref<HTMLElement | null>(null)
-const selectedProjectId = ref('')
 
 const loadAgentChat = async (convId: string) => {
   try {
@@ -675,7 +957,7 @@ const sendAgentMessage = async () => {
     method: 'POST',
     credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ message: userMsg, projectId: selectedProjectId.value || undefined }),
+    body: JSON.stringify({ message: userMsg, projectIds: selectedConv.value?.projectIds }),
   })
 
   if (!res.body) {

@@ -8,6 +8,9 @@ import {
   getStatus,
   listConversations,
   listMessages,
+  openConversation,
+  patchConversationConfig,
+  searchContacts,
   sendMessage,
   startQrSse,
 } from '../controllers/telegram.controller'
@@ -21,7 +24,11 @@ router.get('/status', asyncHandler(getStatus))
 router.get('/qr', asyncHandler(startQrSse))
 router.delete('/session', asyncHandler(disconnectSession))
 
+router.get('/contacts/search', asyncHandler(searchContacts))
+
 router.get('/conversations', asyncHandler(listConversations))
+router.post('/conversations/open', asyncHandler(openConversation))
+router.patch('/conversations/:id/config', asyncHandler(patchConversationConfig))
 router.get('/conversations/:id/messages', asyncHandler(listMessages))
 router.post('/conversations/:id/send', asyncHandler(sendMessage))
 

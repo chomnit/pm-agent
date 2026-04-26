@@ -1,7 +1,8 @@
 import dotenv from 'dotenv'
 import Anthropic from '@anthropic-ai/sdk'
 
-dotenv.config()
+// Use override:true so the .env file value wins even if the shell has the var set to empty string.
+dotenv.config({ override: true })
 
 const apiKey = process.env.ANTHROPIC_API_KEY
 

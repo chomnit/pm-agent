@@ -9,6 +9,8 @@ import {
   findMessagesByConversationId,
   findRecentMessagesByConversationId,
   upsertAgentChat,
+  upsertConversation,
+  updateConversationConfig,
   findSessionByUserId,
 } from '../models/telegram.model'
 import { getOrgKnowledge, getProjectKnowledge } from '../services/context.service'
@@ -162,6 +164,77 @@ export const downloadMedia = async (req: Request, res: Response) => {
   }
 }
 
+// ─── Conversation Config ──────────────────────────────────────────────────────
+
+export const patchConversationConfig = async (req: Request, res: Response) => {
+  const userId = uid(req)
+  const conversationId = param(req, 'id')
+  const { customInstruction, projectIds, autoResponse } = req.body
+
+  const conv = await findConversationById(conversationId)
+  if (!conv || conv.userId !== userId) {
+    return res.status(404).json({ error: 'Conversation not found' })
+  }
+
+  await updateConversationConfig(conversationId, {
+    customInstruction: customInstruction ?? null,
+    projectIds: Array.isArray(projectIds) ? projectIds : [],
+    autoResponse: Boolean(autoResponse),
+  })
+
+  return res.json({ ok: true })
+}
+
+// ─── Contact Search ───────────────────────────────────────────────────────────
+
+export const searchContacts = async (req: Request, res: Response) => {
+  const userId = uid(req)
+  const q = String(req.query.q || '').trim()
+
+  if (q.length < 2) {
+    return res.status(400).json({ error: 'Query must be at least 2 characters' })
+  }
+
+  try {
+    const contacts = await tg.searchContacts(userId, q)
+    return res.json({ data: contacts })
+  } catch (err) {
+    console.error('searchContacts error:', err)
+    return res.status(500).json({ error: 'Search failed' })
+  }
+}
+
+// ─── Open Conversation ────────────────────────────────────────────────────────
+
+export const openConversation = async (req: Request, res: Response) => {
+  const userId = uid(req)
+  const { peerId, peerType, peerName, peerUsername } = req.body
+
+  if (!peerId || !peerType || !peerName) {
+    return res.status(400).json({ error: 'peerId, peerType and peerName are required' })
+  }
+
+  const all = await findConversationsByUserId(userId)
+  const existing = all.find((c) => c.telegramPeerId === Number(peerId))
+  if (existing) return res.json({ data: existing })
+
+  await upsertConversation(userId, {
+    telegramPeerId: Number(peerId),
+    peerType,
+    peerName,
+    peerUsername: peerUsername ?? null,
+    lastMessage: null,
+    lastMessageAt: null,
+    unreadCount: 0,
+  })
+
+  const updated = await findConversationsByUserId(userId)
+  const conv = updated.find((c) => c.telegramPeerId === Number(peerId))
+
+  if (!conv) return res.status(500).json({ error: 'Failed to open conversation' })
+  return res.json({ data: conv })
+}
+
 // ─── Agent Chat ───────────────────────────────────────────────────────────────
 
 export const getAgentChat = async (req: Request, res: Response) => {
@@ -195,10 +268,15 @@ export const agentChat = async (req: Request, res: Response) => {
   const history = existingChat?.messages ?? []
   const isFirstMessage = history.length === 0
 
-  const [orgKnowledge, projectFeatures] = await Promise.all([
+  const resolvedProjectIds: string[] = conv.projectIds.length
+    ? conv.projectIds
+    : projectId ? [String(projectId)] : []
+
+  const [orgKnowledge, ...perProjectFeatures] = await Promise.all([
     getOrgKnowledge(),
-    projectId ? getProjectKnowledge(String(projectId)) : Promise.resolve([]),
+    ...resolvedProjectIds.map((pid) => getProjectKnowledge(pid)),
   ])
+  const projectFeatures = perProjectFeatures.flat()
 
   const orgText = orgKnowledge
     .map((item) => `--- ${item.title} (${item.category}) ---\n${item.content}`)
@@ -236,6 +314,7 @@ export const agentChat = async (req: Request, res: Response) => {
 
   const systemPrompt =
     `You are a helpful AI assistant that helps the user draft replies to Telegram messages.\n\n` +
+    (conv.customInstruction ? `[CUSTOM INSTRUCTION]\n${conv.customInstruction}\n\n` : '') +
     (orgText ? `[ORGANIZATIONAL KNOWLEDGE]\n${orgText}\n\n` : '') +
     (featureText ? `[PROJECT FEATURES]\n${featureText}\n\n` : '') +
     (historyText ? `[CONVERSATION HISTORY - Last 3 months]\n${historyText}\n\n` : '') +

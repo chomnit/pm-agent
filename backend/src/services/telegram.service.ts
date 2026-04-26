@@ -1,5 +1,6 @@
 import bigInt from 'big-integer'
 import { TelegramClient } from 'telegram'
+import { NewMessage, NewMessageEvent } from 'telegram/events'
 import { Dialog } from 'telegram/tl/custom/dialog'
 import { StringSession } from 'telegram/sessions'
 import { Api } from 'telegram'
@@ -10,14 +11,133 @@ import {
   updateSessionString,
   upsertConversation,
   findConversationById,
+  findConversationsByUserId,
+  findRecentMessagesByConversationId,
   findMessagesByConversationId,
   upsertMessage,
 } from '../models/telegram.model'
+import Anthropic from '@anthropic-ai/sdk'
+import dotenv from 'dotenv'
+import { getOrgKnowledge, getProjectKnowledge } from './context.service'
 
 const API_ID = Number(process.env.TELEGRAM_API_ID || '0')
 const API_HASH = process.env.TELEGRAM_API_HASH || ''
 
 const clients = new Map<string, TelegramClient>()
+// Track per-client-instance so a new TelegramClient always gets its handler,
+// even if the same userId reconnects without a server restart.
+const autoResponseAttached = new WeakSet<TelegramClient>()
+const autoResponseTimers = new Map<string, ReturnType<typeof setTimeout>>()
+
+const handleAutoResponse = async (
+  userId: string,
+  client: TelegramClient,
+  event: NewMessageEvent
+): Promise<void> => {
+  const msg = event.message
+  if (!msg || msg.out === true || !msg.message) return
+
+  // Resolve numeric peer ID from the incoming message
+  const peerId = msg.peerId
+  let numericPeerId: number | null = null
+  if (peerId instanceof Api.PeerUser) numericPeerId = Number(peerId.userId)
+  else if (peerId instanceof Api.PeerChat) numericPeerId = Number(peerId.chatId)
+  else if (peerId instanceof Api.PeerChannel) numericPeerId = Number(peerId.channelId)
+  if (!numericPeerId) return
+
+  console.log(`[auto-response] incoming message from peerId=${numericPeerId} for userId=${userId}`)
+
+  // Check if auto-response is enabled for this conversation
+  const conversations = await findConversationsByUserId(userId)
+  const conv = conversations.find(
+    (c) => c.telegramPeerId === numericPeerId && c.autoResponse
+  )
+  if (!conv) {
+    console.log(`[auto-response] no auto-response conversation found for peerId=${numericPeerId}`)
+    return
+  }
+  console.log(`[auto-response] triggered for conversation "${conv.peerName}" (${conv.id})`)
+
+  // Debounce per conversation — wait 2 s after the last message before replying
+  const timerKey = `${userId}:${conv.id}`
+  const existing = autoResponseTimers.get(timerKey)
+  if (existing) clearTimeout(existing)
+
+  const timer = setTimeout(async () => {
+    autoResponseTimers.delete(timerKey)
+    try {
+      const [orgKnowledge, ...perProjectFeatures] = await Promise.all([
+        getOrgKnowledge(),
+        ...conv.projectIds.map((pid) => getProjectKnowledge(pid)),
+      ])
+      const projectFeatures = perProjectFeatures.flat()
+
+      const orgText = orgKnowledge
+        .map((item) => `--- ${item.title} (${item.category}) ---\n${item.content}`)
+        .join('\n\n')
+
+      const featureText = projectFeatures
+        .map((f) => `--- ${(f as any).name} [${(f as any).status}] ---\n${(f as any).description}`)
+        .join('\n\n')
+
+      const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
+      const recentMessages = await findRecentMessagesByConversationId(conv.id, since, 20)
+      const historyText = recentMessages
+        .filter((m) => m.text)
+        .map((m) => `${m.isOutgoing ? 'Me' : conv.peerName}: ${m.text}`)
+        .join('\n')
+
+      const systemPrompt =
+        `You are an AI assistant sending automatic Telegram replies on behalf of the user.\n\n` +
+        (conv.customInstruction ? `[INSTRUCTION]\n${conv.customInstruction}\n\n` : '') +
+        (orgText ? `[ORGANIZATIONAL KNOWLEDGE]\n${orgText}\n\n` : '') +
+        (featureText ? `[PROJECT FEATURES]\n${featureText}\n\n` : '') +
+        (historyText ? `[RECENT CONVERSATION]\n${historyText}\n\n` : '') +
+        `[LATEST MESSAGE FROM ${conv.peerName}]\n${msg.message}\n\n` +
+        `Reply naturally and concisely. Output ONLY the reply text, no preamble.`
+
+      // Re-load .env with override so the key is available even if the shell
+      // had the var set to empty string before the process started.
+      dotenv.config({ override: true })
+      const anthropicApiKey = process.env.ANTHROPIC_API_KEY
+      if (!anthropicApiKey) {
+        console.error('[auto-response] ANTHROPIC_API_KEY not set, skipping')
+        return
+      }
+      const anthropic = new Anthropic({ apiKey: anthropicApiKey })
+      const response = await anthropic.messages.create({
+        model: 'claude-haiku-4-5',
+        max_tokens: 1024,
+        system: systemPrompt,
+        messages: [{ role: 'user', content: 'Send the reply now.' }],
+      })
+
+      const replyText =
+        response.content[0].type === 'text' ? response.content[0].text.trim() : null
+      if (!replyText) return
+
+      const peer = makePeer(conv.telegramPeerId, conv.peerType)
+      await client.sendMessage(peer, { message: replyText })
+
+      // Sync the sent message into the DB so it appears in the UI
+      await syncMessages(userId, conv.id, 5)
+    } catch (err) {
+      console.error('[auto-response] error:', err)
+    }
+  }, 2000)
+
+  autoResponseTimers.set(timerKey, timer)
+}
+
+const attachAutoResponseHandler = (userId: string, client: TelegramClient): void => {
+  if (autoResponseAttached.has(client)) return
+  autoResponseAttached.add(client)
+  client.addEventHandler(
+    (event: NewMessageEvent) => handleAutoResponse(userId, client, event),
+    new NewMessage({ incoming: true })
+  )
+  console.log(`[auto-response] handler attached for user ${userId}`)
+}
 
 const makeClient = (sessionString = '') => {
   const session = new StringSession(sessionString)
@@ -28,7 +148,11 @@ const makeClient = (sessionString = '') => {
 
 export const getClient = async (userId: string): Promise<TelegramClient> => {
   const existing = clients.get(userId)
-  if (existing?.connected) return existing
+  if (existing?.connected) {
+    // Defensively ensure the auto-response handler is attached even if we return early
+    try { attachAutoResponseHandler(userId, existing) } catch { /* already attached */ }
+    return existing
+  }
 
   const stored = await findSessionByUserId(userId)
   if (!stored) throw new Error('No Telegram session for user')
@@ -41,6 +165,11 @@ export const getClient = async (userId: string): Promise<TelegramClient> => {
   }
 
   clients.set(userId, client)
+  try {
+    attachAutoResponseHandler(userId, client)
+  } catch (err) {
+    console.error('[auto-response] attach failed:', err)
+  }
   return client
 }
 
@@ -77,6 +206,7 @@ export const startQrLogin = async (
     sessionString,
   })
 
+  attachAutoResponseHandler(userId, client)
   onDone()
 }
 
@@ -89,6 +219,7 @@ export const disconnectUser = async (userId: string): Promise<void> => {
       // ignore
     }
     clients.delete(userId)
+    // WeakSet auto-cleans when the client is GC'd; no manual removal needed
   }
   await deleteSession(userId)
 }
@@ -280,6 +411,52 @@ export const sendMessage = async (
     message: text,
     ...(parseMode ? { parseMode } : {}),
   })
+}
+
+export interface ContactResult {
+  peerId: number
+  peerType: 'user' | 'group' | 'channel'
+  peerName: string
+  peerUsername: string | null
+}
+
+export const searchContacts = async (userId: string, query: string): Promise<ContactResult[]> => {
+  const client = await getClient(userId)
+  const result = await client.invoke(
+    new Api.contacts.Search({ q: query, limit: 20 })
+  )
+
+  const contacts: ContactResult[] = []
+
+  for (const user of result.users) {
+    if (!(user instanceof Api.User)) continue
+    contacts.push({
+      peerId: Number(user.id),
+      peerType: 'user',
+      peerName: [user.firstName, user.lastName].filter(Boolean).join(' ') || 'Unknown',
+      peerUsername: user.username ?? null,
+    })
+  }
+
+  for (const chat of result.chats) {
+    if (chat instanceof Api.Chat) {
+      contacts.push({
+        peerId: Number(chat.id),
+        peerType: 'group',
+        peerName: chat.title || 'Group',
+        peerUsername: null,
+      })
+    } else if (chat instanceof Api.Channel) {
+      contacts.push({
+        peerId: Number(chat.id),
+        peerType: chat.megagroup ? 'group' : 'channel',
+        peerName: chat.title || 'Channel',
+        peerUsername: chat.username ?? null,
+      })
+    }
+  }
+
+  return contacts
 }
 
 export const downloadMedia = async (

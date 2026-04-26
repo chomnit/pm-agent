@@ -95,6 +95,9 @@ type ConversationRow = RowDataPacket & {
   last_message: string | null
   last_message_at: string | null
   unread_count: number
+  custom_instruction: string | null
+  project_ids: string | null
+  auto_response: number
   updated_at: string
 }
 
@@ -108,7 +111,26 @@ export type TelegramConversation = {
   lastMessage: string | null
   lastMessageAt: string | null
   unreadCount: number
+  customInstruction: string | null
+  projectIds: string[]
+  autoResponse: boolean
   updatedAt: string
+}
+
+/** Safely parse a DB value that may be a JSON string, a pre-parsed array (mysql2
+ *  auto-casts JSON columns), null, or an invalid string. Always returns string[]. */
+const parseJsonArray = (val: string | null | unknown): string[] => {
+  if (!val) return []
+  if (Array.isArray(val)) return val as string[]
+  if (typeof val === 'string') {
+    try {
+      const parsed = JSON.parse(val)
+      return Array.isArray(parsed) ? parsed : []
+    } catch {
+      return []
+    }
+  }
+  return []
 }
 
 const mapConversation = (row: ConversationRow): TelegramConversation => ({
@@ -121,6 +143,9 @@ const mapConversation = (row: ConversationRow): TelegramConversation => ({
   lastMessage: row.last_message,
   lastMessageAt: row.last_message_at,
   unreadCount: row.unread_count,
+  customInstruction: row.custom_instruction,
+  projectIds: parseJsonArray(row.project_ids),
+  autoResponse: Boolean(row.auto_response),
   updatedAt: row.updated_at,
 })
 
@@ -175,6 +200,18 @@ export const upsertConversation = async (
     [userId, data.telegramPeerId]
   )
   return mapConversation(rows[0])
+}
+
+export const updateConversationConfig = async (
+  id: string,
+  data: { customInstruction: string | null; projectIds: string[]; autoResponse: boolean }
+): Promise<void> => {
+  await pool.query(
+    `UPDATE telegram_conversations
+     SET custom_instruction = ?, project_ids = ?, auto_response = ?, updated_at = CURRENT_TIMESTAMP
+     WHERE id = ?`,
+    [data.customInstruction, JSON.stringify(data.projectIds), data.autoResponse ? 1 : 0, id]
+  )
 }
 
 // ─── Messages ─────────────────────────────────────────────────────────────────
@@ -313,7 +350,7 @@ const mapAgentChat = (row: AgentChatRow): MessengerAgentChat => ({
   userId: row.user_id,
   conversationId: row.conversation_id,
   projectId: row.project_id,
-  messages: typeof row.messages === 'string' ? JSON.parse(row.messages) : row.messages,
+  messages: typeof row.messages === 'string' ? (() => { try { return JSON.parse(row.messages) } catch { return [] } })() : (row.messages ?? []),
   createdAt: row.created_at,
   updatedAt: row.updated_at,
 })
