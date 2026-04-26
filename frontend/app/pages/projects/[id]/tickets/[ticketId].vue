@@ -1,5 +1,5 @@
 <template>
-  <div class="flex flex-col h-full overflow-y-auto">
+  <div class="flex flex-col h-full overflow-y-auto" ref="pageScrollEl">
     <div class="px-8 py-6 flex-1">
       <!-- Breadcrumb -->
       <nav class="flex items-center gap-1.5 text-sm mb-6">
@@ -152,145 +152,68 @@
                     <div class="h-4 bg-gray-100 rounded animate-pulse w-5/6"></div>
                   </div>
 
-                  <!-- Draft content — split into sections with inline comments -->
-                  <div v-else-if="stage.latestDraft">
-                    <template v-for="section in parsedSections" :key="section.slug">
-                      <div
-                        class="group relative px-6 py-5 transition-colors duration-150"
-                        :class="ticket.status === 'review' ? 'hover:bg-amber-50/40' : ''"
-                        @mouseup="handleSectionMouseUp(section.slug, $event)"
-                      >
-                        <!-- Comment count badge (when comments exist) -->
+                  <!-- Draft content — side-by-side: doc pane (65%) + comment rail (35%) -->
+                  <div v-else-if="stage.latestDraft" class="flex">
+                    <!-- LEFT: document pane -->
+                    <div class="w-[65%] border-r" style="border-color: var(--color-border)" :ref="setDocPaneEl">
+                      <template v-for="section in parsedSections" :key="section.slug">
                         <div
-                          v-if="inlineComments[section.slug]?.length"
-                          class="absolute top-4 right-4 flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-100 border border-amber-200 text-amber-700 text-xs font-semibold select-none"
+                          class="group relative px-6 py-5 transition-colors duration-150"
+                          :class="ticket.status === 'review' ? 'hover:bg-amber-50/30' : ''"
+                          :ref="el => setSectionEl(section.slug, el)"
+                          @mouseup="handleSectionMouseUp(section.slug, $event)"
                         >
-                          <Icon name="heroicons:chat-bubble-oval-left-ellipsis" class="w-3.5 h-3.5" />
-                          {{ inlineComments[section.slug].length }}
+                          <!-- [+ Note] hover button -->
+                          <button
+                            v-if="ticket.status === 'review'"
+                            class="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 px-2 py-0.5 rounded-md border bg-white text-xs font-medium shadow-sm hover:bg-amber-50 hover:border-amber-300 hover:text-amber-700"
+                            style="border-color: var(--color-border); color: var(--color-muted)"
+                            @click="openFreeComment(section.slug)"
+                          >
+                            <Icon name="heroicons:plus" class="w-3 h-3" />
+                            Note
+                          </button>
+
+                          <!-- Markdown content -->
+                          <div class="prose prose-sm max-w-none">
+                            <MDC :value="section.content" />
+                          </div>
                         </div>
+                      </template>
+                    </div>
 
-                        <!-- "Add note" hover button (no selection) -->
-                        <button
-                          v-else-if="ticket.status === 'review'"
-                          class="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1.5 px-2.5 py-1 rounded-lg border bg-white text-xs font-medium shadow-sm hover:bg-amber-50 hover:border-amber-300 hover:text-amber-700"
-                          style="border-color: var(--color-border); color: var(--color-muted)"
-                          @click="openFreeComment(section.slug)"
-                        >
-                          <Icon name="heroicons:chat-bubble-oval-left" class="w-3.5 h-3.5" />
-                          Add note
-                        </button>
-
-                        <!-- Markdown content -->
-                        <div class="prose prose-sm max-w-none" :class="ticket.status === 'review' ? 'pr-28' : ''">
-                          <MDC :value="section.content" />
-                        </div>
-
-                        <!-- Comment cards (selection-based + free-form) -->
-                        <div v-if="inlineComments[section.slug]?.length" class="mt-3 space-y-2">
-                          <div
-                            v-for="comment in inlineComments[section.slug]"
+                    <!-- RIGHT: comment rail -->
+                    <div class="w-[35%] relative flex-shrink-0 bg-amber-50/20" :ref="setRailEl">
+                      <div :style="{ minHeight: docPaneHeight + 'px' }">
+                        <template v-for="(comments, slug) in inlineComments" :key="slug">
+                          <PddCommentCard
+                            v-for="comment in comments"
                             :key="comment.id"
-                            class="rounded-xl border border-amber-200 bg-amber-50 overflow-hidden shadow-sm"
-                          >
-                            <!-- Quote blockquote (selection-based only) -->
-                            <blockquote
-                              v-if="comment.quote"
-                              class="mx-3.5 mt-3 border-l-2 border-amber-400 pl-3 text-xs text-amber-700 italic leading-relaxed line-clamp-3"
-                            >
-                              "{{ comment.quote }}"
-                            </blockquote>
-
-                            <!-- Edit mode -->
-                            <div v-if="activeCommentId === comment.id">
-                              <textarea
-                                v-model="comment.text"
-                                rows="3"
-                                autofocus
-                                placeholder="What should change here?"
-                                class="w-full px-3.5 py-2.5 text-sm bg-transparent outline-none resize-none text-amber-900 placeholder-amber-400/80"
-                              ></textarea>
-                              <div class="flex items-center justify-end gap-2 px-3.5 py-2 border-t border-amber-200">
-                                <button
-                                  class="text-xs text-amber-500 hover:text-red-600 transition-colors"
-                                  @click="removeComment(section.slug, comment.id)"
-                                >
-                                  Delete
-                                </button>
-                                <button
-                                  class="px-3 py-1 rounded-lg bg-amber-600 text-white text-xs font-medium hover:bg-amber-700 transition-colors"
-                                  @click="closeCommentForm"
-                                >
-                                  Done
-                                </button>
-                              </div>
-                            </div>
-
-                            <!-- Read mode — click to edit -->
-                            <div
-                              v-else
-                              class="px-3.5 py-2.5 cursor-pointer hover:bg-amber-100/60 transition-colors group/card"
-                              @click="activeCommentId = comment.id; activeCommentSlug = section.slug"
-                            >
-                              <p v-if="comment.text.trim()" class="text-sm text-amber-900 leading-relaxed">{{ comment.text }}</p>
-                              <p v-else class="text-xs text-amber-400 italic">Click to add your note...</p>
-                              <button
-                                class="mt-1 text-xs text-amber-400 opacity-0 group-hover/card:opacity-100 hover:text-red-500 transition-all"
-                                @click.stop="removeComment(section.slug, comment.id)"
-                              >
-                                Remove
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-
-                        <!-- Free-form new comment form (from "Add note" button) -->
-                        <Transition
-                          enter-active-class="transition-all duration-200 ease-out"
-                          enter-from-class="opacity-0 -translate-y-1"
-                          enter-to-class="opacity-100 translate-y-0"
-                          leave-active-class="transition-all duration-150 ease-in"
-                          leave-from-class="opacity-100 translate-y-0"
-                          leave-to-class="opacity-0 -translate-y-1"
-                        >
-                          <div
-                            v-if="activeCommentSlug === section.slug && activeCommentId === null"
-                            class="mt-3 rounded-xl border border-amber-200 bg-amber-50 overflow-hidden shadow-sm"
-                          >
-                            <div class="flex items-center gap-2 px-3.5 py-2 border-b border-amber-200 bg-amber-100/70">
-                              <Icon name="heroicons:chat-bubble-oval-left-ellipsis" class="w-3.5 h-3.5 text-amber-600 flex-shrink-0" />
-                              <span class="text-xs font-semibold text-amber-800 truncate">{{ section.heading || 'Introduction' }}</span>
-                              <button
-                                class="ml-auto flex-shrink-0 text-amber-400 hover:text-amber-700 transition-colors"
-                                @click="closeCommentForm"
-                              >
-                                <Icon name="heroicons:x-mark" class="w-3.5 h-3.5" />
-                              </button>
-                            </div>
-                            <textarea
-                              v-model="freeCommentDraft"
-                              rows="3"
-                              autofocus
-                              placeholder="What should change in this section?"
-                              class="w-full px-3.5 py-2.5 text-sm bg-transparent outline-none resize-none text-amber-900 placeholder-amber-400/80"
-                            ></textarea>
-                            <div class="flex items-center justify-end gap-2 px-3.5 py-2 border-t border-amber-200">
-                              <button
-                                class="text-xs text-amber-500 hover:text-amber-700 transition-colors"
-                                @click="closeCommentForm"
-                              >
-                                Cancel
-                              </button>
-                              <button
-                                class="px-3 py-1 rounded-lg bg-amber-600 text-white text-xs font-medium hover:bg-amber-700 transition-colors"
-                                @click="commitFreeComment(section.slug)"
-                              >
-                                Add
-                              </button>
-                            </div>
-                          </div>
-                        </Transition>
+                            :comment="comment"
+                            :is-active="activeCommentId === comment.id"
+                            :is-hovered="hoveredCommentId === comment.id"
+                            :top="commentPositions.anchors.get(comment.id)?.resolvedTop ?? 0"
+                            @activate="activeCommentId = comment.id; activeCommentSlug = String(slug)"
+                            @update:text="v => onCommentTextUpdate(String(slug), comment.id, v)"
+                            @done="closeCommentForm"
+                            @delete="removeComment(String(slug), comment.id)"
+                            @resize="h => commentPositions.setCardHeight(comment.id, h)"
+                          />
+                        </template>
+                        <PddCommentCard
+                          v-if="pendingComment"
+                          key="__pending__"
+                          :comment="pendingComment"
+                          :is-active="true"
+                          :is-hovered="false"
+                          :top="commentPositions.anchors.get(pendingComment.id)?.resolvedTop ?? 0"
+                          @update:text="onPendingTextUpdate"
+                          @done="commitPendingComment"
+                          @delete="cancelPendingComment"
+                          @resize="h => { if (pendingComment) commentPositions.setCardHeight(pendingComment.id, h) }"
+                        />
                       </div>
-                    </template>
+                    </div>
                   </div>
                 </template>
               </template>
@@ -615,10 +538,40 @@ interface SectionComment { id: string; quote: string; text: string }
 const inlineComments = reactive<Record<string, SectionComment[]>>({})
 const activeCommentSlug = ref<string | null>(null)
 const activeCommentId = ref<string | null>(null)
-const freeCommentDraft = ref('')
+const hoveredCommentId = ref<string | null>(null)
+
+// ─── Comment rail layout ──────────────────────────────────────────
+const pageScrollEl = ref<HTMLElement | null>(null)
+const docPaneEl = ref<HTMLElement | null>(null)
+const railEl = ref<HTMLElement | null>(null)
+const docPaneHeight = ref(0)
+const sectionEls = reactive<Record<string, HTMLElement>>({})
+const pendingComment = ref<{ id: string; slug: string; quote: string; text: string } | null>(null)
+const commentPositions = useCommentPositions()
+
+useResizeObserver(docPaneEl, (entries) => { if (entries[0]) docPaneHeight.value = entries[0].contentRect.height })
+
+// Hover over a highlighted mark → light up its comment card in the rail
+useEventListener(docPaneEl, 'mouseover', (e: MouseEvent) => {
+  const mark = (e.target as HTMLElement).closest?.('mark.comment-highlight') as HTMLElement | null
+  hoveredCommentId.value = mark?.dataset.commentId ?? null
+})
+
+const setDocPaneEl = (el: unknown) => { docPaneEl.value = el as HTMLElement | null }
+const setRailEl = (el: unknown) => { railEl.value = el as HTMLElement | null }
+const setSectionEl = (slug: string, el: unknown) => { if (el) sectionEls[slug] = el as HTMLElement }
+
+// Explicit script-scope handlers so Vue doesn't auto-unwrap the ref
+const onPendingTextUpdate = (v: string) => { if (pendingComment.value) pendingComment.value.text = v }
+const onCommentTextUpdate = (slug: string, id: string, v: string) => {
+  const arr = inlineComments[slug]
+  if (!arr) return
+  const c = arr.find(c => c.id === id)
+  if (c) c.text = v
+}
 
 // ─── Selection bubble ─────────────────────────────────────────────
-interface SelectionState { slug: string; quote: string; x: number; y: number }
+interface SelectionState { slug: string; quote: string; x: number; y: number; anchorY: number }
 const pendingSelection = ref<SelectionState | null>(null)
 
 // ─── Edit modal ───────────────────────────────────────────────────
@@ -677,7 +630,7 @@ const parsedSections = computed(() => {
       if (current.length > 0) {
         sections.push({ heading: currentHeading, slug: currentSlug, content: current.join('\n').trim() })
       }
-      currentHeading = h2[1].trim()
+      currentHeading = h2[1]!.trim()
       currentSlug = currentHeading.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '')
       current = [line]
     } else if (/^---+$/.test(line.trim())) {
@@ -714,36 +667,60 @@ const handleSectionMouseUp = (slug: string, event: MouseEvent) => {
     slug,
     quote: selectedText,
     x: rect.left + rect.width / 2,
-    y: rect.top - 8
+    y: rect.top - 8,
+    anchorY: rect.top
   }
 }
 
 // Called by the bubble button (@mousedown.prevent to beat the dismiss listener)
 const commitSelectionComment = () => {
   if (!pendingSelection.value) return
-  const { slug, quote } = pendingSelection.value
-  if (!inlineComments[slug]) inlineComments[slug] = []
+  const { slug, quote, anchorY } = pendingSelection.value
   const id = crypto.randomUUID()
-  inlineComments[slug].push({ id, quote, text: '' })
+  let anchorTop = 0
+  if (railEl.value) {
+    anchorTop = Math.max(0, anchorY - railEl.value.getBoundingClientRect().top)
+  }
+  commentPositions.addComment(id, anchorTop)
+  pendingComment.value = { id, slug, quote, text: '' }
   activeCommentSlug.value = slug
-  activeCommentId.value = id
+  activeCommentId.value = null
   window.getSelection()?.removeAllRanges()
   pendingSelection.value = null
 }
 
 // ─── Free-form (no-selection) comments ───────────────────────────
 const openFreeComment = (slug: string) => {
-  freeCommentDraft.value = ''
+  const id = crypto.randomUUID()
+  let anchorTop = 0
+  const sectionEl = sectionEls[slug]
+  if (sectionEl && railEl.value) {
+    anchorTop = Math.max(0, sectionEl.getBoundingClientRect().top - railEl.value.getBoundingClientRect().top)
+  }
+  commentPositions.addComment(id, anchorTop)
+  pendingComment.value = { id, slug, quote: '', text: '' }
   activeCommentSlug.value = slug
   activeCommentId.value = null
 }
 
-const commitFreeComment = (slug: string) => {
-  if (!freeCommentDraft.value.trim()) { closeCommentForm(); return }
+const commitPendingComment = () => {
+  if (!pendingComment.value) return
+  const { id, slug, quote, text } = pendingComment.value
+  if (!text.trim()) { cancelPendingComment(); return }
   if (!inlineComments[slug]) inlineComments[slug] = []
-  inlineComments[slug].push({ id: crypto.randomUUID(), quote: '', text: freeCommentDraft.value.trim() })
-  freeCommentDraft.value = ''
-  closeCommentForm()
+  inlineComments[slug].push({ id, quote, text: text.trim() })
+  pendingComment.value = null
+  activeCommentSlug.value = null
+  activeCommentId.value = null
+  // Measure anchor after MDC re-renders with the new highlight
+  nextTick().then(() => nextTick()).then(measureAnchors)
+}
+
+const cancelPendingComment = () => {
+  if (pendingComment.value) commentPositions.removeComment(pendingComment.value.id)
+  pendingComment.value = null
+  activeCommentSlug.value = null
+  activeCommentId.value = null
 }
 
 const closeCommentForm = () => {
@@ -752,6 +729,14 @@ const closeCommentForm = () => {
 }
 
 const removeComment = (slug: string, id: string) => {
+  // Restore highlighted text in DOM
+  const quote = inlineComments[slug]?.find(c => c.id === id)?.quote ?? ''
+  const sectionEl = sectionEls[slug]
+  if (sectionEl && quote) {
+    const mark = sectionEl.querySelector(`[data-comment-id="${id}"]`)
+    if (mark) mark.replaceWith(document.createTextNode(quote))
+  }
+  commentPositions.removeComment(id)
   const arr = inlineComments[slug]
   if (!arr) return
   const idx = arr.findIndex(c => c.id === id)
@@ -774,11 +759,83 @@ const buildFeedbackFromComments = (): string =>
     .join('\n\n')
 
 const clearComments = () => {
+  // Restore all highlighted text in the DOM
+  for (const [slug, comments] of Object.entries(inlineComments)) {
+    const sectionEl = sectionEls[slug]
+    if (sectionEl) {
+      for (const c of comments) {
+        const mark = sectionEl.querySelector(`[data-comment-id="${c.id}"]`)
+        if (mark && c.quote) mark.replaceWith(document.createTextNode(c.quote))
+      }
+    }
+  }
+  commentPositions.clear()
   Object.keys(inlineComments).forEach(k => delete inlineComments[k])
+  localStorage.removeItem(storageKey)
+  pendingComment.value = null
   activeCommentSlug.value = null
   activeCommentId.value = null
   pendingSelection.value = null
 }
+
+// ─── Highlight injection + anchor measurement ─────────────────────
+const injectHighlight = (container: HTMLElement, id: string, quote: string): HTMLElement | null => {
+  const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT)
+  let node: Text | null
+  while ((node = walker.nextNode() as Text | null)) {
+    const idx = node.textContent?.indexOf(quote) ?? -1
+    if (idx === -1) continue
+    const before = node.splitText(idx)
+    before.splitText(quote.length)
+    const mark = document.createElement('mark')
+    mark.dataset.commentId = id
+    mark.className = 'comment-highlight'
+    before.parentNode!.replaceChild(mark, before)
+    mark.appendChild(before)
+    return mark
+  }
+  return null
+}
+
+const measureAnchors = () => {
+  if (!railEl.value) return
+  const railTop = railEl.value.getBoundingClientRect().top
+  for (const [slug, comments] of Object.entries(inlineComments)) {
+    const sectionEl = sectionEls[slug]
+    if (!sectionEl) continue
+    for (const comment of comments ?? []) {
+      if (comment.quote) {
+        const existing = sectionEl.querySelector(`[data-comment-id="${comment.id}"]`) as HTMLElement | null
+        if (!existing) {
+          const mark = injectHighlight(sectionEl, comment.id, comment.quote)
+          if (mark) commentPositions.setAnchorTop(comment.id, mark.getBoundingClientRect().top - railTop)
+        } else {
+          commentPositions.setAnchorTop(comment.id, existing.getBoundingClientRect().top - railTop)
+        }
+      } else {
+        commentPositions.setAnchorTop(comment.id, sectionEl.getBoundingClientRect().top - railTop)
+      }
+    }
+  }
+}
+
+const storageKey = `pdd-comments-${ticketId}`
+let restoringFromStorage = false
+
+watch(inlineComments, async () => {
+  // Persist to localStorage
+  const entries = Object.entries(inlineComments).filter(([, arr]) => arr?.length)
+  if (entries.length === 0) {
+    localStorage.removeItem(storageKey)
+  } else {
+    localStorage.setItem(storageKey, JSON.stringify(Object.fromEntries(entries)))
+  }
+  // Skip measuring during localStorage restore — fetchTicket schedules its own delayed measure
+  if (restoringFromStorage) return
+  await nextTick()
+  await nextTick()
+  measureAnchors()
+}, { deep: true })
 
 // ─── Data fetching & streaming ────────────────────────────────────
 const fetchTicket = async (silent = false) => {
@@ -793,6 +850,30 @@ const fetchTicket = async (silent = false) => {
     const stageId = res.data.stages?.[0]?.id
     if (stageId && res.data.stages?.[0]?.latestDraft && !diagrams.value.length) {
       fetchDiagramsOnce(stageId)
+    }
+    // Restore saved comments from localStorage (only when ticket has a draft to comment on)
+    if (!silent && res.data.stages?.[0]?.latestDraft) {
+      try {
+        const saved = localStorage.getItem(storageKey)
+        if (saved) {
+          const parsed = JSON.parse(saved) as Record<string, SectionComment[]>
+          // Suppress the inlineComments watcher's premature measureAnchors call
+          restoringFromStorage = true
+          for (const [slug, comments] of Object.entries(parsed)) {
+            if (Array.isArray(comments) && comments.length > 0) {
+              inlineComments[slug] = comments
+              for (const c of comments) commentPositions.addComment(c.id, 0)
+            }
+          }
+          restoringFromStorage = false
+          // Wait for Vue + MDC to fully render before injecting highlights & measuring anchors
+          await nextTick()
+          await nextTick()
+          setTimeout(measureAnchors, 300)
+        }
+      } catch {
+        localStorage.removeItem(storageKey)
+      }
     }
   } finally {
     if (!silent) loading.value = false

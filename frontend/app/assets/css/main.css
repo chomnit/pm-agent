@@ -206,3 +206,17 @@ body {
   font-weight: 600;
   color: var(--color-text);
 }
+
+/* Inline comment highlights (injected by TreeWalker after MDC renders) */
+mark.comment-highlight {
+  background-color: rgb(254 243 199 / 0.6);
+  border-bottom: 2px solid rgb(245 158 11);
+  border-radius: 2px;
+  padding: 0 1px;
+  color: inherit;
+  cursor: pointer;
+}
+mark.comment-highlight:hover,
+mark.comment-highlight.active {
+  background-color: rgb(253 230 138 / 0.9);
+}
