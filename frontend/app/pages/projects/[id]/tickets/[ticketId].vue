@@ -163,17 +163,6 @@
                           :ref="el => setSectionEl(section.slug, el)"
                           @mouseup="handleSectionMouseUp(section.slug, $event)"
                         >
-                          <!-- [+ Note] hover button -->
-                          <button
-                            v-if="ticket.status === 'review'"
-                            class="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 px-2 py-0.5 rounded-md border bg-white text-xs font-medium shadow-sm hover:bg-amber-50 hover:border-amber-300 hover:text-amber-700"
-                            style="border-color: var(--color-border); color: var(--color-muted)"
-                            @click="openFreeComment(section.slug)"
-                          >
-                            <Icon name="heroicons:plus" class="w-3 h-3" />
-                            Note
-                          </button>
-
                           <!-- Markdown content -->
                           <div class="prose prose-sm max-w-none">
                             <MDC :value="section.content" />
@@ -571,7 +560,7 @@ const onCommentTextUpdate = (slug: string, id: string, v: string) => {
 }
 
 // ─── Selection bubble ─────────────────────────────────────────────
-interface SelectionState { slug: string; quote: string; x: number; y: number; anchorY: number }
+interface SelectionState { slug: string; quote: string; x: number; y: number; anchorY: number; range: Range }
 const pendingSelection = ref<SelectionState | null>(null)
 
 // ─── Edit modal ───────────────────────────────────────────────────
@@ -668,19 +657,25 @@ const handleSectionMouseUp = (slug: string, event: MouseEvent) => {
     quote: selectedText,
     x: rect.left + rect.width / 2,
     y: rect.top - 8,
-    anchorY: rect.top
+    anchorY: rect.top,
+    range: range.cloneRange()
   }
 }
 
 // Called by the bubble button (@mousedown.prevent to beat the dismiss listener)
 const commitSelectionComment = () => {
   if (!pendingSelection.value) return
-  const { slug, quote, anchorY } = pendingSelection.value
+  const { slug, quote, anchorY, range } = pendingSelection.value
   const id = crypto.randomUUID()
-  let anchorTop = 0
-  if (railEl.value) {
-    anchorTop = Math.max(0, anchorY - railEl.value.getBoundingClientRect().top)
+  let anchorTop = Math.max(0, anchorY - (railEl.value?.getBoundingClientRect().top ?? 0))
+
+  // Inject the highlight immediately using the live Range — this handles cross-element
+  // selections (bullet lists, bold/italic boundaries) that the TreeWalker can't match.
+  const mark = highlightRange(range, id)
+  if (mark && railEl.value) {
+    anchorTop = Math.max(0, mark.getBoundingClientRect().top - railEl.value.getBoundingClientRect().top)
   }
+
   commentPositions.addComment(id, anchorTop)
   pendingComment.value = { id, slug, quote, text: '' }
   activeCommentSlug.value = slug
@@ -729,12 +724,12 @@ const closeCommentForm = () => {
 }
 
 const removeComment = (slug: string, id: string) => {
-  // Restore highlighted text in DOM
-  const quote = inlineComments[slug]?.find(c => c.id === id)?.quote ?? ''
+  // Unwrap all marks for this id — multi-segment highlights create multiple <mark> elements
   const sectionEl = sectionEls[slug]
-  if (sectionEl && quote) {
-    const mark = sectionEl.querySelector(`[data-comment-id="${id}"]`)
-    if (mark) mark.replaceWith(document.createTextNode(quote))
+  if (sectionEl) {
+    sectionEl.querySelectorAll(`[data-comment-id="${id}"]`).forEach(mark => {
+      mark.replaceWith(...Array.from(mark.childNodes))
+    })
   }
   commentPositions.removeComment(id)
   const arr = inlineComments[slug]
@@ -764,8 +759,9 @@ const clearComments = () => {
     const sectionEl = sectionEls[slug]
     if (sectionEl) {
       for (const c of comments) {
-        const mark = sectionEl.querySelector(`[data-comment-id="${c.id}"]`)
-        if (mark && c.quote) mark.replaceWith(document.createTextNode(c.quote))
+        sectionEl.querySelectorAll(`[data-comment-id="${c.id}"]`).forEach(mark => {
+          mark.replaceWith(...Array.from(mark.childNodes))
+        })
       }
     }
   }
@@ -779,22 +775,123 @@ const clearComments = () => {
 }
 
 // ─── Highlight injection + anchor measurement ─────────────────────
-const injectHighlight = (container: HTMLElement, id: string, quote: string): HTMLElement | null => {
-  const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT)
-  let node: Text | null
-  while ((node = walker.nextNode() as Text | null)) {
-    const idx = node.textContent?.indexOf(quote) ?? -1
-    if (idx === -1) continue
-    const before = node.splitText(idx)
-    before.splitText(quote.length)
-    const mark = document.createElement('mark')
-    mark.dataset.commentId = id
-    mark.className = 'comment-highlight'
-    before.parentNode!.replaceChild(mark, before)
-    mark.appendChild(before)
+
+// Range-based highlight: works for any selection including cross-element (bold, list items).
+// Used for freshly-created comments while the live Range is still available.
+const highlightRange = (range: Range, id: string): HTMLElement | null => {
+  const mark = document.createElement('mark')
+  mark.dataset.commentId = id
+  mark.className = 'comment-highlight'
+  try {
+    // Simple path: range stays within a single element boundary
+    range.surroundContents(mark)
     return mark
+  } catch {
+    // Cross-element path (e.g. multi-bullet selection): wrap each text node segment individually.
+    // Using extractContents() would break the DOM structure (partial <li> nodes etc.), so instead
+    // we find all text nodes within the range and wrap each one in its own <mark>.
+    const ancestor = range.commonAncestorContainer
+    const root = ancestor.nodeType === Node.TEXT_NODE
+      ? (ancestor as Text).parentElement!
+      : ancestor as Element
+
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
+    const segments: Array<{ node: Text; start: number; end: number }> = []
+
+    let textNode: Node | null
+    while ((textNode = walker.nextNode())) {
+      const t = textNode as Text
+      let start = 0
+      let end = t.length
+      let inRange = false
+
+      if (t === range.startContainer) {
+        start = range.startOffset
+        inRange = true
+      } else if (t === range.endContainer) {
+        end = range.endOffset
+        inRange = true
+      } else {
+        try { inRange = range.comparePoint(t, 0) === 0 } catch { inRange = false }
+      }
+
+      if (inRange && start < end) segments.push({ node: t, start, end })
+    }
+
+    if (segments.length === 0) return null
+
+    let firstMark: HTMLElement | null = null
+    // Process last-to-first so earlier text-node offsets stay valid
+    for (let i = segments.length - 1; i >= 0; i--) {
+      const { node, start, end } = segments[i]!
+      const m = document.createElement('mark')
+      m.dataset.commentId = id
+      m.className = 'comment-highlight'
+      // Split: node=[0..end], rest=[end..]; then node=[0..start], wrapping=[start..end]
+      node.splitText(end)
+      const wrapping = node.splitText(start)
+      wrapping.parentNode!.replaceChild(m, wrapping)
+      m.appendChild(wrapping)
+      if (i === 0) firstMark = m
+    }
+    return firstMark
+  }
+}
+
+// Maps a flat textContent character index to the exact Text node + offset in the live DOM.
+// Traverses into mark elements so it works correctly after partial highlights are injected.
+const flatIndexToNode = (container: HTMLElement, charIdx: number): { node: Text; offset: number } | null => {
+  const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT)
+  let pos = 0
+  let n: Node | null
+  while ((n = walker.nextNode())) {
+    const t = n as Text
+    if (pos + t.length > charIdx) return { node: t, offset: charIdx - pos }
+    pos += t.length
   }
   return null
+}
+
+// Text-search highlight: used when restoring comments from localStorage (no Range available).
+// Uses container.textContent for matching so it works across inline elements (bold, italic, etc.)
+// and falls back to a per-line multi-segment approach for multi-bullet selections.
+const injectHighlight = (container: HTMLElement, id: string, quote: string): HTMLElement | null => {
+  const flatText = container.textContent ?? ''
+
+  // Direct match: the quote appears verbatim in the flat text (handles cross-inline-element too)
+  const startIdx = flatText.indexOf(quote)
+  if (startIdx !== -1) {
+    const start = flatIndexToNode(container, startIdx)
+    const end = flatIndexToNode(container, startIdx + quote.length)
+    if (start && end) {
+      const range = document.createRange()
+      range.setStart(start.node, start.offset)
+      range.setEnd(end.node, end.offset)
+      return highlightRange(range, id)
+    }
+  }
+
+  // Multi-segment path: quote has \n (multi-bullet / multi-block selection).
+  // Find each line in the flat text and highlight it using flatIndexToNode.
+  const lines = quote.split('\n').map(l => l.trim()).filter(Boolean)
+  if (lines.length < 2) return null
+  let firstMark: HTMLElement | null = null
+  let searchFrom = 0
+  for (const line of lines) {
+    const lineIdx = flatText.indexOf(line, searchFrom)
+    if (lineIdx === -1) continue
+    const start = flatIndexToNode(container, lineIdx)
+    const end = flatIndexToNode(container, lineIdx + line.length)
+    if (start && end) {
+      const range = document.createRange()
+      range.setStart(start.node, start.offset)
+      range.setEnd(end.node, end.offset)
+      const mark = highlightRange(range, id)
+      if (mark && !firstMark) firstMark = mark
+    }
+    searchFrom = lineIdx + line.length
+  }
+  return firstMark
 }
 
 const measureAnchors = () => {
@@ -817,6 +914,24 @@ const measureAnchors = () => {
       }
     }
   }
+}
+
+// Retry measureAnchors until all quote marks are injected (MDC renders async)
+const scheduleMeasureAnchors = () => {
+  const INTERVAL = 150
+  const MAX_ATTEMPTS = 20 // ~3 s ceiling
+  let attempts = 0
+  const attempt = () => {
+    measureAnchors()
+    // Keep retrying while ANY comment either lacks a section element (MDC not yet rendered)
+    // OR has a quote but no <mark> in the DOM yet.
+    const hasUninjected = Object.entries(inlineComments).some(([slug, arr]) => {
+      const el = sectionEls[slug]
+      return (arr ?? []).some(c => c.quote && (!el || !el.querySelector(`[data-comment-id="${c.id}"]`)))
+    })
+    if (hasUninjected && ++attempts < MAX_ATTEMPTS) setTimeout(attempt, INTERVAL)
+  }
+  setTimeout(attempt, INTERVAL)
 }
 
 const storageKey = `pdd-comments-${ticketId}`
@@ -866,10 +981,9 @@ const fetchTicket = async (silent = false) => {
             }
           }
           restoringFromStorage = false
-          // Wait for Vue + MDC to fully render before injecting highlights & measuring anchors
+          // Retry until MDC finishes async rendering and all marks are injected
           await nextTick()
-          await nextTick()
-          setTimeout(measureAnchors, 300)
+          scheduleMeasureAnchors()
         }
       } catch {
         localStorage.removeItem(storageKey)
