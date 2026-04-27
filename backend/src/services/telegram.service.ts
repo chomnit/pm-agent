@@ -31,6 +31,10 @@ const clients = new Map<string, TelegramClient>()
 const autoResponseAttached = new WeakSet<TelegramClient>()
 const autoResponseTimers = new Map<string, ReturnType<typeof setTimeout>>()
 
+// Cache the logged-in user's own profile per userId so we don't call getMe()
+// on every incoming group message.
+const meSelfCache = new Map<string, Api.User>()
+
 // ─── Cooldown: at most 1 auto-reply per conversation per 60 s ────────────────
 const lastAutoReplyAt = new Map<string, number>()
 const AUTO_REPLY_COOLDOWN_MS = 15_000
@@ -108,7 +112,42 @@ const handleAutoResponse = async (
   // In group / channel chats, only respond when the logged-in user is explicitly
   // mentioned. Replying to every group message would be extremely spammy and
   // could get the account flagged by Telegram.
-  if (isGroupMessage && !msg.mentioned) return
+  if (isGroupMessage) {
+    // Primary check: Telegram server sets this flag when the user is @mentioned
+    let isMentioned = msg.mentioned === true
+
+    // Fallback: inspect message entities directly.
+    // gramjs doesn't always populate msg.mentioned reliably, so we cross-check
+    // the raw entity list for MessageEntityMention (@username text) and
+    // MessageEntityMentionName (inline mention by user ID).
+    if (!isMentioned && msg.entities?.length) {
+      try {
+        let me = meSelfCache.get(userId)
+        if (!me) {
+          me = (await client.getMe()) as Api.User
+          meSelfCache.set(userId, me)
+        }
+        for (const entity of msg.entities) {
+          if (entity instanceof Api.MessageEntityMentionName) {
+            if (Number(entity.userId) === Number(me.id)) { isMentioned = true; break }
+          }
+          if (entity instanceof Api.MessageEntityMention && me.username) {
+            // entity covers "@username" text; offset+1 to skip the "@"
+            const mentioned = msg.message?.slice(entity.offset + 1, entity.offset + entity.length)
+            if (mentioned?.toLowerCase() === me.username.toLowerCase()) { isMentioned = true; break }
+          }
+        }
+      } catch (err) {
+        console.warn('[auto-response] getMe failed during mention check:', err)
+      }
+    }
+
+    if (!isMentioned) {
+      console.log(`[auto-response] group message in peer ${numericPeerId} — not mentioned, skipping`)
+      return
+    }
+    console.log(`[auto-response] group mention detected in peer ${numericPeerId} (mentioned flag: ${msg.mentioned})`)
+  }
 
   // Use cached conversation list — avoids a DB hit on every incoming message
   const conversations = await getCachedConversations(userId)
