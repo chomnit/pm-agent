@@ -11,7 +11,7 @@ router.get(
   passport.authenticate('google', { failureRedirect: '/auth/failed', session: true }),
   (_req, res) => {
     const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3010'
-    res.redirect(`${frontendUrl}/api/auth/callback`)
+    res.redirect(`${frontendUrl}/dashboard`)
   }
 )
 
