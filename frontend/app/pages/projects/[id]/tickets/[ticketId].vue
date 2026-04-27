@@ -1,97 +1,125 @@
 <template>
-  <div class="flex flex-col h-full overflow-y-auto" ref="pageScrollEl">
-    <div class="px-8 py-6 flex-1">
-      <!-- Breadcrumb -->
-      <nav class="flex items-center gap-1.5 text-sm mb-6">
-        <NuxtLink to="/dashboard" class="transition-colors hover:underline" style="color: var(--color-muted)">Projects</NuxtLink>
-        <Icon name="heroicons:chevron-right" class="w-3.5 h-3.5 flex-shrink-0" style="color: var(--color-muted)" />
-        <NuxtLink :to="`/projects/${projectId}`" class="transition-colors hover:underline" style="color: var(--color-muted)">Board</NuxtLink>
-        <Icon name="heroicons:chevron-right" class="w-3.5 h-3.5 flex-shrink-0" style="color: var(--color-muted)" />
-        <span class="font-medium" style="color: var(--color-text)">{{ ticket ? `TICKET-${String(ticket.ticketNumber).padStart(3, '0')}` : '...' }}</span>
-      </nav>
+  <div class="flex h-full overflow-hidden">
 
-      <!-- Loading -->
-      <div v-if="loading" class="animate-pulse space-y-4">
-        <div class="h-6 bg-gray-200 rounded w-1/4"></div>
-        <div class="h-8 bg-gray-100 rounded w-2/3"></div>
-      </div>
+    <!-- ═══ MAIN SCROLL AREA ═════════════════════════════════════════ -->
+    <div class="flex-1 overflow-y-auto min-w-0" ref="mainScrollEl">
+      <div class="px-8 py-6">
 
-      <template v-else-if="ticket">
-        <!-- Ticket header -->
-        <div class="flex items-start justify-between gap-4 mb-6">
-          <div class="flex-1">
+        <!-- Breadcrumb -->
+        <nav class="flex items-center gap-1.5 text-sm mb-5">
+          <NuxtLink to="/dashboard" class="transition-colors hover:underline" style="color: var(--color-muted)">Projects</NuxtLink>
+          <Icon name="heroicons:chevron-right" class="w-3.5 h-3.5 flex-shrink-0" style="color: var(--color-muted)" />
+          <NuxtLink :to="`/projects/${projectId}`" class="transition-colors hover:underline" style="color: var(--color-muted)">Board</NuxtLink>
+          <Icon name="heroicons:chevron-right" class="w-3.5 h-3.5 flex-shrink-0" style="color: var(--color-muted)" />
+          <span class="font-medium" style="color: var(--color-text)">{{ ticket ? `TICKET-${String(ticket.ticketNumber).padStart(3, '0')}` : '...' }}</span>
+        </nav>
+
+        <!-- Loading skeleton -->
+        <div v-if="loading" class="animate-pulse space-y-4">
+          <div class="h-4 bg-gray-200 rounded w-24"></div>
+          <div class="h-8 bg-gray-100 rounded w-2/3"></div>
+          <div class="h-12 bg-white rounded-xl border w-full mt-5" style="border-color: var(--color-border)"></div>
+        </div>
+
+        <template v-else-if="ticket">
+
+          <!-- ── Title ─────────────────────────────────────────────── -->
+          <div class="mb-5">
             <div class="flex items-center gap-2 mb-1.5">
-              <span class="mono text-sm" style="color: var(--color-muted)">TICKET-{{ String(ticket.ticketNumber).padStart(3, '0') }}</span>
-              <span class="text-sm font-medium px-2 py-0.5 rounded-full" :class="priorityClass(ticket.priority)">{{ ticket.priority.toUpperCase() }}</span>
-              <span class="text-sm font-medium px-2 py-0.5 rounded-full" :class="ticketStatusClass(ticket.status)">{{ ticket.status.replace('_', ' ').replace(/\b\w/g, c => c.toUpperCase()) }}</span>
-            </div>
-            <h1 class="text-2xl font-semibold leading-tight" style="color: var(--color-text)">{{ ticket.title }}</h1>
-            <div v-if="ticket.description" class="flex flex-wrap gap-1.5 mt-2">
-              <span
-                v-for="item in ticket.description.split(/\s*[-–]\s+/).filter(s => s.trim())"
-                :key="item"
-                class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium border"
-                style="background: var(--color-bg); border-color: var(--color-border); color: var(--color-muted)"
-              >
-                <span class="w-1 h-1 rounded-full bg-gray-400 flex-shrink-0"></span>
-                {{ item.trim() }}
+              <span class="mono text-sm" style="color: var(--color-muted)">
+                TICKET-{{ String(ticket.ticketNumber).padStart(3, '0') }}
+              </span>
+              <span class="text-xs font-medium px-2 py-0.5 rounded-full" :class="priorityClass(ticket.priority)">
+                {{ ticket.priority.toUpperCase() }}
               </span>
             </div>
-            <p class="text-sm mt-2" style="color: var(--color-muted)">
+            <h1 class="text-2xl font-semibold leading-tight" style="color: var(--color-text)">{{ ticket.title }}</h1>
+            <p class="text-xs mt-1.5" style="color: var(--color-muted)">
               Created by {{ ticket.createdByUser?.name ?? 'Unknown' }} · {{ formatDate(ticket.createdAt) }}
             </p>
           </div>
-          <div class="flex items-center gap-2 flex-shrink-0 mt-1">
-            <!-- Edit button -->
-            <button
-              class="flex items-center gap-1.5 px-3 py-2 rounded-lg border text-sm font-medium transition-colors hover:bg-gray-50"
-              style="border-color: var(--color-border); color: var(--color-text)"
-              @click="openEditModal"
-            >
-              <Icon name="heroicons:pencil" class="w-4 h-4" />
-              Edit
-            </button>
 
-            <!-- Run Agent -->
-            <button
-              :disabled="!canRun || isRunning"
-              class="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-              :class="canRun && !isRunning ? 'bg-violet-600 text-white hover:bg-violet-700' : 'bg-gray-100 text-gray-500'"
-              @click="runAgents"
-            >
-              <span v-if="isRunning" class="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
-              <Icon v-else name="heroicons:sparkles" class="w-4 h-4" />
-              {{ isRunning ? 'Running...' : '✦ Generate PDD' }}
-            </button>
-
-            <!-- Approve Ticket (only when review) -->
-            <button
-              v-if="ticket.status === 'review'"
-              :disabled="approvingTicket"
-              class="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700 transition-colors disabled:opacity-40"
-              @click="approveTicket"
-            >
-              <Icon name="heroicons:check-circle" class="w-4 h-4" />
-              {{ approvingTicket ? 'Approving...' : 'Approve' }}
-            </button>
+          <!-- ── Workflow status progress bar ──────────────────────── -->
+          <div
+            class="flex items-center mb-6 rounded-xl border px-5 py-3"
+            style="background: var(--color-card); border-color: var(--color-border)"
+          >
+            <template v-for="(step, i) in statusSteps" :key="step.key">
+              <div class="flex items-center gap-2 flex-shrink-0">
+                <!-- Circle -->
+                <div
+                  class="w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 transition-all duration-300"
+                  :class="i < currentStatusIndex
+                    ? 'bg-emerald-500 text-white'
+                    : i === currentStatusIndex
+                      ? (isRunning ? 'bg-blue-500 text-white' : 'bg-violet-600 text-white')
+                      : 'bg-gray-100'"
+                >
+                  <Icon v-if="i < currentStatusIndex" name="heroicons:check" class="w-3 h-3" />
+                  <span v-else-if="isRunning && i === currentStatusIndex" class="w-2 h-2 rounded-full bg-white animate-pulse"></span>
+                  <span v-else-if="i === currentStatusIndex" class="w-2 h-2 rounded-full bg-white"></span>
+                </div>
+                <!-- Label -->
+                <span
+                  class="text-xs font-medium transition-colors"
+                  :class="i < currentStatusIndex
+                    ? 'text-emerald-600'
+                    : i === currentStatusIndex
+                      ? (isRunning ? 'text-blue-600' : 'text-violet-700')
+                      : 'text-gray-400'"
+                >{{ step.label }}</span>
+              </div>
+              <!-- Connector line -->
+              <div
+                v-if="i < statusSteps.length - 1"
+                class="flex-1 h-0.5 mx-3 min-w-[12px] transition-all duration-500"
+                :class="i < currentStatusIndex ? 'bg-emerald-400' : 'bg-gray-200'"
+              ></div>
+            </template>
           </div>
-        </div>
 
-        <!-- Main content -->
-        <div>
+          <!-- ── Running indicator banner ──────────────────────────── -->
+          <div v-if="isRunning" class="flex items-center gap-3 p-4 rounded-xl border border-blue-200 bg-blue-50 mb-4">
+            <span class="w-3 h-3 border-2 border-blue-500 border-t-transparent rounded-full animate-spin flex-shrink-0"></span>
+            <div class="min-w-0 flex-1">
+              <p class="text-sm font-medium text-blue-700">Agent is writing PDD</p>
+              <p class="text-xs text-blue-500 mt-0.5 truncate">
+                {{ currentStreamingSection ? `Writing: ${currentStreamingSection}` : (streamingContent ? 'Writing document...' : 'Preparing context...') }}
+              </p>
+            </div>
+            <span v-if="streamingContent" class="ml-auto text-xs text-blue-400 mono flex-shrink-0">{{ streamingContent.length }} chars</span>
+          </div>
+
+          <!-- ── Section TOC (sticky within main scroll) ───────────── -->
+          <div
+            v-if="parsedSections.length > 1 && ticket.status !== 'backlog'"
+            class="sticky top-0 z-10 -mx-8 px-8 py-2 border-b mb-4"
+            style="background: var(--color-bg); border-color: var(--color-border)"
+          >
+            <div class="flex items-center gap-1.5 overflow-x-auto" style="scrollbar-width: none; -ms-overflow-style: none">
+              <button
+                v-for="section in parsedSections"
+                :key="section.slug"
+                class="flex-shrink-0 flex items-center gap-1 text-xs px-2.5 py-1 rounded-full font-medium transition-colors whitespace-nowrap"
+                :class="activeSection === section.slug
+                  ? 'bg-violet-100 text-violet-700'
+                  : 'text-gray-500 hover:bg-gray-100 hover:text-gray-700'"
+                @click="scrollToSection(section.slug)"
+              >
+                {{ section.heading || 'Intro' }}
+                <span
+                  v-if="(inlineComments[section.slug]?.length ?? 0) > 0"
+                  class="inline-flex items-center justify-center min-w-[1rem] h-4 rounded-full text-[10px] font-bold leading-none px-1"
+                  :class="activeSection === section.slug ? 'bg-violet-500 text-white' : 'bg-amber-500 text-white'"
+                >{{ inlineComments[section.slug]?.length }}</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- ── Main content ──────────────────────────────────────── -->
           <div class="space-y-4">
 
-            <!-- Running indicator banner -->
-            <div v-if="isRunning" class="flex items-center gap-3 p-4 rounded-xl border border-blue-200 bg-blue-50">
-              <span class="w-3 h-3 border-2 border-blue-500 border-t-transparent rounded-full animate-spin flex-shrink-0"></span>
-              <div>
-                <p class="text-sm font-medium text-blue-700">Agent is writing PDD</p>
-                <p class="text-xs text-blue-500 mt-0.5">{{ streamingContent ? 'Writing document...' : 'Preparing context...' }}</p>
-              </div>
-              <span v-if="streamingContent" class="ml-auto text-xs text-blue-400 mono">{{ streamingContent.length }} chars</span>
-            </div>
-
-            <!-- Consolidated output document -->
+            <!-- PDD output document -->
             <div
               v-if="ticket.status !== 'backlog'"
               class="rounded-xl border overflow-hidden"
@@ -99,18 +127,34 @@
             >
               <template v-for="stage in ticket.stages" :key="stage.id">
                 <template v-if="stage.latestDraft || stage.status === 'running'">
-                  <!-- Stage divider header -->
+
+                  <!-- Doc header bar -->
                   <div
                     class="flex items-center gap-3 px-5 py-3 border-b"
-                    :class="stage.status === 'running' ? 'bg-blue-50 border-blue-200' : 'bg-gray-50'"
-                    :style="stage.status !== 'running' ? 'border-color: var(--color-border)' : ''"
+                    :class="stage.status === 'running'
+                      ? 'bg-blue-50 border-blue-200'
+                      : ticket.status === 'review'
+                        ? 'bg-amber-50 border-amber-200'
+                        : 'bg-gray-50'"
+                    :style="stage.status !== 'running' && ticket.status !== 'review' ? 'border-color: var(--color-border)' : ''"
                   >
                     <div class="w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0" :class="historyDotClass(stage.status)">
                       <Icon v-if="stage.status === 'approved'" name="heroicons:check" class="w-3 h-3" />
                       <span v-else-if="stage.status === 'running'" class="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse"></span>
                     </div>
-                    <span class="text-xs font-semibold uppercase tracking-wide" :style="stage.status === 'running' ? 'color: #2563eb' : stage.status === 'approved' ? 'color: #059669' : 'color: var(--color-muted)'">
+                    <span
+                      class="text-xs font-semibold uppercase tracking-wide"
+                      :style="stage.status === 'running' ? 'color: #2563eb' : stage.status === 'approved' ? 'color: #059669' : 'color: var(--color-muted)'"
+                    >
                       Product Description Document
+                    </span>
+                    <!-- Review mode badge -->
+                    <span
+                      v-if="ticket.status === 'review' && stage.status !== 'running'"
+                      class="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded bg-amber-100 text-amber-700"
+                    >
+                      <span class="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse"></span>
+                      Awaiting Review
                     </span>
                     <div class="flex items-center gap-1.5 ml-auto">
                       <span v-if="stage.latestDraft" class="text-xs mono" style="color: var(--color-muted)">v{{ stage.latestDraft.versionNumber }}</span>
@@ -137,12 +181,12 @@
                     </div>
                   </div>
 
-                  <!-- Streaming live preview — plain pre to avoid MDC re-parsing on every token -->
+                  <!-- Streaming live preview -->
                   <div v-if="stage.status === 'running' && streamingContent" class="px-6 py-5">
                     <pre class="whitespace-pre-wrap text-sm font-sans leading-relaxed" style="color: var(--color-text)">{{ streamingContent }}<span class="inline-block w-0.5 h-4 bg-blue-500 animate-pulse ml-0.5 align-middle rounded-full"></span></pre>
                   </div>
 
-                  <!-- Fallback shimmer (before first chunk arrives) -->
+                  <!-- Fallback shimmer (before first streaming chunk) -->
                   <div v-else-if="stage.status === 'running'" class="p-6 space-y-3">
                     <div class="h-4 bg-blue-100 rounded animate-pulse w-full"></div>
                     <div class="h-4 bg-blue-100 rounded animate-pulse w-5/6"></div>
@@ -152,7 +196,7 @@
                     <div class="h-4 bg-gray-100 rounded animate-pulse w-5/6"></div>
                   </div>
 
-                  <!-- Draft content — side-by-side: doc pane (65%) + comment rail (35%) -->
+                  <!-- Draft: doc pane (65%) + comment rail (35%) -->
                   <div v-else-if="stage.latestDraft" class="flex">
                     <!-- LEFT: document pane -->
                     <div class="w-[65%] border-r" style="border-color: var(--color-border)" :ref="setDocPaneEl">
@@ -161,9 +205,9 @@
                           class="group relative px-6 py-5 transition-colors duration-150"
                           :class="ticket.status === 'review' ? 'hover:bg-amber-50/30' : ''"
                           :ref="el => setSectionEl(section.slug, el)"
+                          :data-toc-slug="section.slug"
                           @mouseup="handleSectionMouseUp(section.slug, $event)"
                         >
-                          <!-- Markdown content -->
                           <div class="prose prose-sm max-w-none">
                             <MDC :value="section.content" />
                           </div>
@@ -204,6 +248,7 @@
                       </div>
                     </div>
                   </div>
+
                 </template>
               </template>
             </div>
@@ -259,65 +304,29 @@
               </div>
             </div>
 
-            <!-- Sticky review action bar -->
-            <div
-              class="sticky bottom-4 rounded-xl border shadow-lg p-4"
-              style="background: var(--color-card); border-color: var(--color-border)"
-            >
+            <!-- Approved confirmation banner -->
+            <div v-if="ticket.status === 'approved'" class="rounded-xl border p-4 bg-emerald-50 border-emerald-200">
               <div class="flex items-center gap-3">
-                <div class="flex-1 min-w-0">
-                  <p class="text-sm font-medium" style="color: var(--color-text)">
-                    <template v-if="commentCount > 0">
-                      <span class="inline-flex items-center gap-1.5">
-                        <span class="inline-flex items-center justify-center w-5 h-5 rounded-full bg-amber-100 text-amber-700 text-xs font-bold">{{ commentCount }}</span>
-                        inline comment{{ commentCount > 1 ? 's' : '' }} added
-                      </span>
-                    </template>
-                    <template v-else>Review the document above</template>
-                  </p>
-                  <p class="text-xs mt-0.5" style="color: var(--color-muted)">
-                    {{ commentCount > 0 ? 'Comments will be sent to the agent on re-run.' : 'Select text in any section to comment, or hover a section to add a general note.' }}
-                  </p>
-                </div>
-                <button
-                  :disabled="isRunning || commentCount === 0"
-                  class="flex-shrink-0 flex items-center gap-1.5 px-4 py-2 rounded-lg bg-violet-600 text-white text-sm font-medium hover:bg-violet-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                  @click="rerunWithFeedback"
-                >
-                  <Icon name="heroicons:arrow-path" class="w-4 h-4" />
-                  Re-run with Feedback
-                </button>
-                <button
-                  :disabled="approvingTicket"
-                  class="flex-shrink-0 flex items-center gap-1.5 px-4 py-2 rounded-lg bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700 transition-colors disabled:opacity-40"
-                  @click="approveTicket"
-                >
-                  <Icon name="heroicons:check-circle" class="w-4 h-4" />
-                  {{ approvingTicket ? 'Approving...' : 'Approve PDD ✓' }}
-                </button>
-              </div>
-            </div>
-
-            <!-- Approved state -->
-            <div v-if="ticket.status === 'approved'" class="rounded-xl border p-5 bg-emerald-50 border-emerald-200">
-              <div class="flex items-center gap-3">
-                <div class="w-8 h-8 rounded-full bg-emerald-500 flex items-center justify-center flex-shrink-0">
+                <div class="w-7 h-7 rounded-full bg-emerald-500 flex items-center justify-center flex-shrink-0">
                   <Icon name="heroicons:check" class="w-4 h-4 text-white" />
                 </div>
                 <div>
                   <p class="text-sm font-semibold text-emerald-700">PDD Approved</p>
-                  <p class="text-xs text-emerald-600 mt-0.5">Product description document approved and ready for development.</p>
+                  <p class="text-xs text-emerald-600 mt-0.5">Ready for development. Download the document from the sidebar.</p>
                 </div>
               </div>
             </div>
 
             <!-- Backlog empty state -->
-            <div v-if="ticket.status === 'backlog'" class="rounded-xl border p-8 flex flex-col items-center text-center" style="background: var(--color-card); border-color: var(--color-border)">
+            <div v-if="ticket.status === 'backlog'" class="rounded-xl border p-12 flex flex-col items-center text-center" style="background: var(--color-card); border-color: var(--color-border)">
               <div class="w-14 h-14 rounded-xl bg-violet-50 flex items-center justify-center mb-4">
                 <Icon name="heroicons:cpu-chip" class="w-7 h-7 text-violet-400" />
               </div>
-              <p class="text-sm font-medium mb-1" style="color: var(--color-text)">Ready to run</p>
-              <p class="text-xs mb-4 max-w-sm" style="color: var(--color-muted)">Click "✦ Generate PDD" to run the AI agent. It will produce a complete Product Description Document covering problem analysis, requirements, and delivery plan.</p>
+              <p class="text-sm font-semibold mb-1" style="color: var(--color-text)">Ready to generate</p>
+              <p class="text-xs mb-5 max-w-sm leading-relaxed" style="color: var(--color-muted)">
+                Click <strong class="text-violet-600">✦ Generate PDD</strong> in the sidebar to run the AI agent.
+                It will produce a complete Product Description Document covering problem analysis, requirements, and delivery plan.
+              </p>
               <button
                 class="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-violet-600 text-white text-sm font-medium hover:bg-violet-700 transition-colors"
                 @click="runAgents"
@@ -326,17 +335,186 @@
                 ✦ Generate PDD
               </button>
             </div>
-          </div>
-        </div>
-      </template>
 
-      <!-- Ticket not found -->
-      <div v-else-if="!loading" class="flex flex-col items-center justify-center py-20 text-center">
-        <Icon name="heroicons:ticket" class="w-12 h-12 text-gray-300 mb-3" />
-        <p class="font-medium" style="color: var(--color-text)">Ticket not found</p>
-        <NuxtLink :to="`/projects/${projectId}`" class="text-sm text-violet-600 mt-2">← Back to Board</NuxtLink>
+          </div>
+        </template>
+
+        <!-- Ticket not found -->
+        <div v-else-if="!loading" class="flex flex-col items-center justify-center py-20 text-center">
+          <Icon name="heroicons:ticket" class="w-12 h-12 text-gray-300 mb-3" />
+          <p class="font-medium" style="color: var(--color-text)">Ticket not found</p>
+          <NuxtLink :to="`/projects/${projectId}`" class="text-sm text-violet-600 mt-2">← Back to Board</NuxtLink>
+        </div>
+
       </div>
     </div>
+
+    <!-- ═══ RIGHT METADATA SIDEBAR ═══════════════════════════════════ -->
+    <div
+      v-if="ticket"
+      class="w-72 flex-shrink-0 border-l overflow-y-auto"
+      style="border-color: var(--color-border); background: var(--color-card)"
+    >
+      <div class="p-4 pt-6 space-y-5">
+
+        <!-- ── Context-aware actions ───────────────────────────────── -->
+        <div class="space-y-2">
+
+          <!-- Backlog: Generate PDD -->
+          <button
+            v-if="ticket.status === 'backlog'"
+            class="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-violet-600 text-white text-sm font-medium hover:bg-violet-700 transition-colors shadow-sm"
+            @click="runAgents"
+          >
+            <Icon name="heroicons:sparkles" class="w-4 h-4" />
+            ✦ Generate PDD
+          </button>
+
+          <!-- In progress: spinner -->
+          <div
+            v-else-if="isRunning"
+            class="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg border border-blue-200 bg-blue-50 text-sm font-medium text-blue-600"
+          >
+            <span class="w-3.5 h-3.5 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></span>
+            Generating...
+          </div>
+
+          <!-- Review: Re-run + Approve -->
+          <template v-else-if="ticket.status === 'review'">
+            <button
+              :disabled="isRunning || commentCount === 0"
+              class="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors"
+              :class="commentCount > 0
+                ? 'bg-violet-600 text-white hover:bg-violet-700 shadow-sm'
+                : 'bg-gray-100 text-gray-400 cursor-not-allowed'"
+              @click="rerunWithFeedback"
+            >
+              <Icon name="heroicons:arrow-path" class="w-4 h-4" />
+              Re-run with Feedback
+              <span
+                v-if="commentCount > 0"
+                class="ml-auto inline-flex items-center justify-center w-5 h-5 rounded-full bg-white/30 text-xs font-bold"
+              >{{ commentCount }}</span>
+            </button>
+            <button
+              :disabled="approvingTicket"
+              class="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700 transition-colors shadow-sm disabled:opacity-40"
+              @click="approveTicket"
+            >
+              <Icon name="heroicons:check-circle" class="w-4 h-4" />
+              {{ approvingTicket ? 'Approving...' : 'Approve PDD ✓' }}
+            </button>
+            <p v-if="commentCount === 0" class="text-xs text-center pt-0.5" style="color: var(--color-muted)">
+              Select text in the doc to add inline comments
+            </p>
+          </template>
+
+          <!-- Approved: download options -->
+          <template v-else-if="ticket.status === 'approved'">
+            <p class="text-xs font-semibold uppercase tracking-wide" style="color: var(--color-muted)">Download PDD</p>
+            <div class="flex gap-2">
+              <button
+                class="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border text-sm font-medium hover:bg-gray-50 transition-colors"
+                style="border-color: var(--color-border); color: var(--color-text)"
+                @click="downloadDraft(ticket.stages?.[0], 'md')"
+              >
+                <Icon name="heroicons:arrow-down-tray" class="w-3.5 h-3.5" />
+                .md
+              </button>
+              <button
+                class="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border text-sm font-medium hover:bg-gray-50 transition-colors"
+                style="border-color: var(--color-border); color: var(--color-text)"
+                @click="downloadDraft(ticket.stages?.[0], 'pdf')"
+              >
+                <Icon name="heroicons:arrow-down-tray" class="w-3.5 h-3.5" />
+                PDF
+              </button>
+            </div>
+          </template>
+
+          <!-- Edit ticket (always visible) -->
+          <button
+            class="w-full flex items-center justify-center gap-1.5 px-4 py-2 rounded-lg border text-sm font-medium hover:bg-gray-50 transition-colors"
+            style="border-color: var(--color-border); color: var(--color-text)"
+            @click="openEditModal"
+          >
+            <Icon name="heroicons:pencil" class="w-3.5 h-3.5" />
+            Edit Ticket
+          </button>
+        </div>
+
+        <div class="border-t" style="border-color: var(--color-border)"></div>
+
+        <!-- ── Ticket details ──────────────────────────────────────── -->
+        <div class="space-y-3">
+          <p class="text-xs font-semibold uppercase tracking-wide" style="color: var(--color-muted)">Details</p>
+          <div class="space-y-2.5">
+            <div class="flex items-center justify-between gap-2">
+              <span class="text-xs flex-shrink-0" style="color: var(--color-muted)">Priority</span>
+              <span class="text-xs font-medium px-2 py-0.5 rounded-full" :class="priorityClass(ticket.priority)">
+                {{ ticket.priority.toUpperCase() }}
+              </span>
+            </div>
+            <div class="flex items-center justify-between gap-2">
+              <span class="text-xs flex-shrink-0" style="color: var(--color-muted)">Status</span>
+              <span class="text-xs font-medium px-2 py-0.5 rounded-full" :class="ticketStatusClass(ticket.status)">
+                {{ ticket.status.replace('_', ' ').replace(/\b\w/g, c => c.toUpperCase()) }}
+              </span>
+            </div>
+            <div class="flex items-center justify-between gap-2">
+              <span class="text-xs flex-shrink-0" style="color: var(--color-muted)">Created by</span>
+              <span class="text-xs font-medium truncate" style="color: var(--color-text)">{{ ticket.createdByUser?.name ?? 'Unknown' }}</span>
+            </div>
+            <div class="flex items-center justify-between gap-2">
+              <span class="text-xs flex-shrink-0" style="color: var(--color-muted)">Created</span>
+              <span class="text-xs" style="color: var(--color-text)">{{ formatDate(ticket.createdAt) }}</span>
+            </div>
+            <div v-if="ticket.stages?.[0]?.latestDraft" class="flex items-center justify-between gap-2">
+              <span class="text-xs flex-shrink-0" style="color: var(--color-muted)">PDD Version</span>
+              <span class="text-xs mono font-medium px-1.5 py-0.5 rounded bg-gray-100" style="color: var(--color-text)">
+                v{{ ticket.stages[0].latestDraft.versionNumber }}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <!-- ── Description ─────────────────────────────────────────── -->
+        <template v-if="ticket.description">
+          <div class="border-t" style="border-color: var(--color-border)"></div>
+          <div>
+            <p class="text-xs font-semibold uppercase tracking-wide mb-2" style="color: var(--color-muted)">Description</p>
+            <p
+              class="text-sm leading-relaxed"
+              :class="!descExpanded ? 'line-clamp-5' : ''"
+              style="color: var(--color-text)"
+            >{{ ticket.description }}</p>
+            <button
+              v-if="ticket.description.length > 180"
+              class="text-xs mt-1.5 text-violet-600 hover:text-violet-700 transition-colors"
+              @click="descExpanded = !descExpanded"
+            >
+              {{ descExpanded ? '↑ Show less' : '↓ Show more' }}
+            </button>
+          </div>
+        </template>
+
+        <!-- ── Inline comment count badge (review mode) ───────────── -->
+        <template v-if="ticket.status === 'review' && commentCount > 0">
+          <div class="border-t" style="border-color: var(--color-border)"></div>
+          <div class="flex items-center gap-2.5 p-3 rounded-lg bg-amber-50 border border-amber-200">
+            <span class="inline-flex items-center justify-center w-6 h-6 rounded-full bg-amber-100 text-amber-700 text-xs font-bold flex-shrink-0">
+              {{ commentCount }}
+            </span>
+            <p class="text-xs text-amber-700 leading-snug">
+              inline {{ commentCount === 1 ? 'comment' : 'comments' }} — click <em>Re-run</em> to send to agent
+            </p>
+          </div>
+        </template>
+
+      </div>
+    </div>
+
+    <!-- ═══ MODALS & OVERLAYS ════════════════════════════════════════ -->
 
     <!-- Edit Ticket Modal -->
     <AppModal :open="editModalOpen" title="Edit Ticket" @close="editModalOpen = false">
@@ -530,7 +708,7 @@ const activeCommentId = ref<string | null>(null)
 const hoveredCommentId = ref<string | null>(null)
 
 // ─── Comment rail layout ──────────────────────────────────────────
-const pageScrollEl = ref<HTMLElement | null>(null)
+const mainScrollEl = ref<HTMLElement | null>(null)
 const docPaneEl = ref<HTMLElement | null>(null)
 const railEl = ref<HTMLElement | null>(null)
 const docPaneHeight = ref(0)
@@ -600,9 +778,74 @@ const saveEdit = async () => {
 
 const isRunning = computed(() => ticket.value?.status === 'in_progress')
 const canRun = computed(() => ticket.value?.status === 'backlog' || ticket.value?.status === 'review')
+
+const currentStreamingSection = computed(() => {
+  if (!streamingContent.value) return null
+  const lines = streamingContent.value.split('\n')
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const m = lines[i]?.match(/^## (.+)/)
+    if (m) return m[1]?.trim() ?? null
+  }
+  return null
+})
 const currentRunningStage = computed(() =>
   ticket.value?.stages?.find(s => s.status === 'running')?.stageType ?? ticket.value?.currentStage ?? null
 )
+
+// ─── Layout & TOC ─────────────────────────────────────────────────
+const activeSection = ref<string>('')
+const descExpanded = ref(false)
+
+const statusSteps = [
+  { key: 'backlog', label: 'Backlog' },
+  { key: 'in_progress', label: 'In Progress' },
+  { key: 'review', label: 'Review' },
+  { key: 'approved', label: 'Approved' },
+]
+const currentStatusIndex = computed(() =>
+  ['backlog', 'in_progress', 'review', 'approved'].indexOf(ticket.value?.status ?? 'backlog')
+)
+
+const scrollToSection = (slug: string) => {
+  const el = sectionEls[slug]
+  if (!el || !mainScrollEl.value) return
+  const containerTop = mainScrollEl.value.getBoundingClientRect().top
+  const elTop = el.getBoundingClientRect().top
+  // 80px offset: accounts for the sticky TOC height (~44px) + comfortable breathing room
+  const offset = mainScrollEl.value.scrollTop + (elTop - containerTop) - 80
+  mainScrollEl.value.scrollTo({ top: Math.max(0, offset), behavior: 'smooth' })
+  activeSection.value = slug
+}
+
+let sectionObserver: IntersectionObserver | null = null
+
+const setupSectionObserver = () => {
+  sectionObserver?.disconnect()
+  if (!mainScrollEl.value || !parsedSections.value.length) return
+  sectionObserver = new IntersectionObserver(
+    (entries) => {
+      const visible = entries.filter(e => e.isIntersecting)
+      if (!visible.length) return
+      // Pick the intersecting section whose top is closest to the scroll container's top
+      const topmost = visible.reduce((best, e) =>
+        e.boundingClientRect.top < best.boundingClientRect.top ? e : best
+      )
+      const slug = (topmost.target as HTMLElement).dataset.tocSlug
+      if (slug) activeSection.value = slug
+    },
+    { root: mainScrollEl.value, threshold: 0.1, rootMargin: '-80px 0px -40% 0px' }
+  )
+  nextTick(() => {
+    for (const section of parsedSections.value) {
+      const el = sectionEls[section.slug]
+      if (el) sectionObserver!.observe(el)
+    }
+    // Initialise activeSection to the first section
+    if (!activeSection.value && parsedSections.value[0]) {
+      activeSection.value = parsedSections.value[0].slug
+    }
+  })
+}
 
 // ─── Section parsing ──────────────────────────────────────────────
 const parsedSections = computed(() => {
@@ -632,6 +875,10 @@ const parsedSections = computed(() => {
     sections.push({ heading: currentHeading, slug: currentSlug, content: current.join('\n').trim() })
   }
   return sections.filter(s => s.content.trim())
+})
+
+watch(() => parsedSections.value.length, (len) => {
+  if (len > 0) nextTick(() => setupSectionObserver())
 })
 
 const commentCount = computed(() =>
@@ -1122,6 +1369,7 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  sectionObserver?.disconnect()
   stopPolling?.()
   stopStream?.()
   stopDiagramsPoll?.()
