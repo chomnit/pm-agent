@@ -36,6 +36,7 @@ import { definePageMeta } from '#imports'
 definePageMeta({ layout: 'auth' })
 
 const signIn = () => {
-  window.location.href = 'http://localhost:5001/auth/google'
+  const config = useRuntimeConfig()
+  window.location.href = `${config.public.apiBase}/auth/google`
 }
 </script>
