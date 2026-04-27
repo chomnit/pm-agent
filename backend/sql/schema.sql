@@ -1,7 +1,7 @@
-CREATE DATABASE IF NOT EXISTS pm_agents
+CREATE DATABASE IF NOT EXISTS po_agent_db
   CHARACTER SET utf8mb4
   COLLATE utf8mb4_unicode_ci;
-USE pm_agents;
+USE po_agent_db;
 
 -- 1. users
 CREATE TABLE users (
