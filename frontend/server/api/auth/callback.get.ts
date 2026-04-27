@@ -1,19 +1,18 @@
-import { defineEventHandler, getCookie, sendRedirect } from 'h3'
+import { defineEventHandler, getHeader, sendRedirect } from 'h3'
 
 export default defineEventHandler(async (event) => {
-  const connectSid = getCookie(event, 'connect.sid')
+  const cookieHeader = getHeader(event, 'cookie') || ''
 
-  if (!connectSid) {
+  if (!cookieHeader.includes('connect.sid')) {
     return sendRedirect(event, '/login?error=no_session')
   }
 
   try {
-    const backendUrl = process.env.NUXT_PUBLIC_API_BASE || 'http://localhost:5001'
     const response = await $fetch<{
       data: { id: string; email: string; name: string; avatarUrl: string | null }
-    }>(`${backendUrl}/auth/me`, {
+    }>('http://localhost:5001/auth/me', {
       headers: {
-        cookie: `connect.sid=${connectSid}`
+        cookie: cookieHeader
       }
     })
 
