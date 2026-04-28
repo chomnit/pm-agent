@@ -18,6 +18,12 @@ import { reconnectAllSessions } from './services/telegram.service'
 
 dotenv.config()
 
+const sessionSecret = process.env.SESSION_SECRET
+if (!sessionSecret) {
+  console.error('FATAL: SESSION_SECRET env var is required')
+  process.exit(1)
+}
+
 const app = express()
 const port = Number(process.env.PORT || 5001)
 const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3010'
@@ -40,7 +46,7 @@ app.use(express.urlencoded({ extended: true }))
 
 app.use(
   session({
-    secret: process.env.SESSION_SECRET || 'dev-session-secret',
+    secret: sessionSecret,
     resave: false,
     saveUninitialized: false,
     cookie: {
@@ -53,6 +59,27 @@ app.use(
 
 app.use(passport.initialize())
 app.use(passport.session())
+
+// CSRF: reject state-changing requests whose Origin doesn't match the frontend.
+// This is a defence-in-depth layer on top of SameSite=lax cookies.
+// GET, HEAD, OPTIONS are read-only and exempted. The /auth/google flow uses
+// server-side redirects so there is no browser-originated POST to protect there.
+app.use((req, res, next) => {
+  const mutatingMethods = ['POST', 'PUT', 'PATCH', 'DELETE']
+  if (!mutatingMethods.includes(req.method)) return next()
+
+  // Allow server-to-server calls that carry no Origin (e.g. internal health checks)
+  const origin = req.headers.origin
+  if (!origin) return next()
+
+  // Normalise: strip trailing slash for comparison
+  const allowed = frontendUrl.replace(/\/$/, '')
+  if (origin.replace(/\/$/, '') !== allowed) {
+    return res.status(403).json({ error: 'Forbidden: invalid request origin' })
+  }
+
+  return next()
+})
 
 app.get('/health', (_req, res) => {
   res.json({ status: 'ok' })
@@ -70,7 +97,9 @@ app.use((err: unknown, _req: express.Request, res: express.Response, _next: expr
   console.error(err)
   res.status(500).json({
     error: 'Internal server error',
-    details: err instanceof Error ? err.message : 'Unknown error'
+    ...(process.env.NODE_ENV === 'development' && {
+      details: err instanceof Error ? err.message : 'Unknown error'
+    })
   })
 })
 

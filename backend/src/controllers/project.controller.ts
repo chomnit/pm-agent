@@ -93,17 +93,24 @@ export const addProjectMember = async (req: Request, res: Response) => {
     return res.status(403).json({ error: 'Only project owner can add members' })
   }
 
-  const { email, role } = req.body as { email?: string; role?: 'owner' | 'member' }
+  const { email, role } = req.body as { email?: string; role?: string }
   if (!email) {
     return res.status(400).json({ error: 'Email is required' })
   }
+
+  const validRoles = ['owner', 'member'] as const
+  type MemberRole = typeof validRoles[number]
+  const resolvedRole: MemberRole =
+    role && (validRoles as readonly string[]).includes(role)
+      ? (role as MemberRole)
+      : 'member'
 
   const user = await findByEmail(email)
   if (!user) {
     return res.status(404).json({ error: 'User not found' })
   }
 
-  await addMember(projectId, user.id, role || 'member', userId)
+  await addMember(projectId, user.id, resolvedRole, userId)
   const members = await getMembers(projectId)
   return res.status(201).json({ data: members })
 }

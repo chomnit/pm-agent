@@ -140,8 +140,11 @@ function renderTokens(doc: InstanceType<typeof PDFDocument>, tokens: Token[]): v
 export function markdownToPdf(content: string, title: string, res: Response): void {
   const doc = new PDFDocument({ margin: PAGE_MARGIN, size: 'A4' })
 
+  // Strip characters that could break the quoted filename token or inject headers
+  const safeFilename = title.replace(/[^\w\s-]/g, '').trim().slice(0, 100) || 'document'
+
   res.setHeader('Content-Type', 'application/pdf')
-  res.setHeader('Content-Disposition', `attachment; filename="${title}.pdf"`)
+  res.setHeader('Content-Disposition', `attachment; filename="${safeFilename}.pdf"`)
 
   doc.pipe(res)
 

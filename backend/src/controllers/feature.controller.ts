@@ -62,8 +62,29 @@ export const updateFeature = async (req: Request, res: Response) => {
     return res.status(404).json({ error: 'Feature not found' })
   }
 
+  const { name, category, status, description, functionality, userRoles, integrations, limitations, tags } =
+    req.body as {
+      name?: string
+      category?: string
+      status?: 'live' | 'in_development' | 'deprecated'
+      description?: string
+      functionality?: string | null
+      userRoles?: string[]
+      integrations?: string[]
+      limitations?: string | null
+      tags?: string[]
+    }
+
   const updated = await update(String(req.params.fid), {
-    ...req.body,
+    name,
+    category,
+    status,
+    description,
+    functionality,
+    userRoles,
+    integrations,
+    limitations,
+    tags,
     updatedBy: (req.user as any).id
   })
 

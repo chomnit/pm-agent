@@ -1,6 +1,23 @@
 import { RowDataPacket } from 'mysql2'
 import { v4 as uuidv4 } from 'uuid'
 import pool from '../config/db'
+import { encrypt, decrypt } from '../utils/crypto'
+
+// Decrypt a session string that may have been stored before encryption was introduced.
+// Encrypted values are colon-delimited hex (iv:authTag:ciphertext); plaintext values
+// are base64 (Telegram StringSession format) and will never contain two colons.
+const decryptSession = (value: string): string => {
+  const parts = value.split(':')
+  if (parts.length === 3) {
+    try {
+      return decrypt(value)
+    } catch {
+      // Not a valid encrypted value — treat as legacy plaintext
+      return value
+    }
+  }
+  return value
+}
 
 // ─── Sessions ────────────────────────────────────────────────────────────────
 
@@ -34,7 +51,7 @@ const mapSession = (row: SessionRow): TelegramSession => ({
   telegramUserId: row.telegram_user_id,
   telegramUsername: row.telegram_username,
   phoneNumber: row.phone_number,
-  sessionString: row.session_string,
+  sessionString: decryptSession(row.session_string),
   status: row.status,
   connectedAt: row.connected_at,
   updatedAt: row.updated_at,
@@ -75,14 +92,14 @@ export const saveSession = async (
        session_string = VALUES(session_string),
        status = 'connected',
        updated_at = CURRENT_TIMESTAMP`,
-    [uuidv4(), userId, data.telegramUserId, data.telegramUsername, data.phoneNumber, data.sessionString]
+    [uuidv4(), userId, data.telegramUserId, data.telegramUsername, data.phoneNumber, encrypt(data.sessionString)]
   )
 }
 
 export const updateSessionString = async (userId: string, sessionString: string): Promise<void> => {
   await pool.query(
     'UPDATE telegram_sessions SET session_string = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?',
-    [sessionString, userId]
+    [encrypt(sessionString), userId]
   )
 }
 
