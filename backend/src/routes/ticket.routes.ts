@@ -20,7 +20,7 @@ const router = Router()
 const pipelineLimiter = rateLimit({
   windowMs: 60_000,
   max: 5,
-  keyGenerator: (req) => (req.user as any)?.id ?? req.ip ?? 'unknown',
+  keyGenerator: (req) => (req.user as any)?.id ?? 'unknown',
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Too many pipeline runs. Please wait before trying again.' }
