@@ -270,11 +270,13 @@
             </div>
             <div class="flex gap-2 items-end">
               <textarea
+                ref="replyInputEl"
                 v-model="replyText"
-                rows="2"
+                rows="1"
                 placeholder="Type a message..."
-                class="flex-1 px-4 py-2.5 rounded-xl border text-sm outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100 resize-none"
-                style="border-color: var(--color-border)"
+                class="flex-1 px-4 py-2.5 rounded-xl border text-sm outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100 resize-none overflow-y-auto leading-relaxed"
+                style="border-color: var(--color-border); max-height: 15rem;"
+                @input="autoResizeReplyInput"
                 @keydown.enter.exact.prevent="sendReply"
               />
               <button
@@ -292,7 +294,7 @@
       </div>
 
       <!-- Right: AI Agent Panel -->
-      <div class="w-80 flex-shrink-0 flex flex-col border-l overflow-hidden" style="background: var(--color-card); border-color: var(--color-border)">
+      <div class="w-96 flex-shrink-0 flex flex-col border-l overflow-hidden" style="background: var(--color-card); border-color: var(--color-border)">
 
         <!-- AI Agent header -->
         <div class="flex-shrink-0 px-4 py-3 border-b" style="border-color: var(--color-border)">
@@ -362,14 +364,16 @@
         <!-- Agent input -->
         <div class="flex-shrink-0 px-4 py-3 border-t" style="border-color: var(--color-border)">
           <div class="flex gap-2">
-            <input
+            <textarea
+              ref="agentInputEl"
               v-model="agentInput"
-              type="text"
+              rows="1"
               placeholder="Ask the agent..."
-              class="flex-1 px-3 py-2 rounded-xl border text-sm outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100"
-              style="border-color: var(--color-border)"
+              class="flex-1 px-3 py-2 rounded-xl border text-sm outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100 resize-none overflow-y-auto leading-relaxed"
+              style="border-color: var(--color-border); max-height: 15rem;"
               :disabled="agentStreaming || !selectedConv"
-              @keydown.enter="sendAgentMessage"
+              @input="autoResizeAgentInput"
+              @keydown.enter.exact.prevent="sendAgentMessage"
             />
             <button
               :disabled="!agentInput.trim() || agentStreaming || !selectedConv"
@@ -755,6 +759,15 @@ const messagesEl = ref<HTMLElement | null>(null)
 const replyText = ref('')
 const replyIsFormatted = ref(false)
 const sending = ref(false)
+const replyInputEl = ref<HTMLTextAreaElement | null>(null)
+
+const autoResizeReplyInput = () => {
+  const el = replyInputEl.value
+  if (!el) return
+  el.style.height = 'auto'
+  // Cap at 10 rows: 10 lines × 24px line-height + 16px vertical padding
+  el.style.height = Math.min(el.scrollHeight, 10 * 24 + 16) + 'px'
+}
 
 // Convert markdown (as produced by the AI agent) to Telegram HTML parse mode.
 // Telegram supports: <b>, <i>, <u>, <s>, <code>, <pre>, <a href="">
@@ -832,6 +845,8 @@ const sendReply = async () => {
   if (!replyText.value.trim() || !selectedConv.value || sending.value) return
   const text = replyText.value.trim()
   replyText.value = ''
+  await nextTick()
+  if (replyInputEl.value) replyInputEl.value.style.height = 'auto'
   sending.value = true
 
   // Optimistic: show the message immediately (stays permanently like iMessage/WhatsApp)
@@ -927,9 +942,11 @@ const extractDraftBody = (text: string): string => {
   return lines.slice(start, end).join('\n').trim()
 }
 
-const useAsReply = (text: string) => {
+const useAsReply = async (text: string) => {
   replyText.value = convertToTelegramHtml(extractDraftBody(text))
   replyIsFormatted.value = true
+  await nextTick()
+  autoResizeReplyInput()
 }
 
 // ─── Agent Chat ───────────────────────────────────────────────────────────────
@@ -941,6 +958,15 @@ const agentInput = ref('')
 const agentStreaming = ref(false)
 const agentStreamBuffer = ref('')
 const agentMessagesEl = ref<HTMLElement | null>(null)
+const agentInputEl = ref<HTMLTextAreaElement | null>(null)
+
+const autoResizeAgentInput = () => {
+  const el = agentInputEl.value
+  if (!el) return
+  el.style.height = 'auto'
+  // Cap at 10 rows: 10 lines × 24px line-height + 16px vertical padding
+  el.style.height = Math.min(el.scrollHeight, 10 * 24 + 16) + 'px'
+}
 
 const loadAgentChat = async (convId: string) => {
   try {
@@ -956,6 +982,8 @@ const sendAgentMessage = async () => {
 
   const userMsg = agentInput.value.trim()
   agentInput.value = ''
+  await nextTick()
+  if (agentInputEl.value) agentInputEl.value.style.height = 'auto'
   agentMessages.value.push({ role: 'user', content: userMsg })
   agentStreaming.value = true
   agentStreamBuffer.value = ''

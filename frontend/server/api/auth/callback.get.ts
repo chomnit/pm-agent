@@ -12,7 +12,7 @@ export default defineEventHandler(async (event) => {
     const apiBase = config.apiBase || 'http://localhost:5001'
 
     const response = await $fetch<{
-      data: { id: string; email: string; name: string; avatarUrl: string | null }
+      data: { id: string; email: string; name: string; avatarUrl: string | null; role: 'superadmin' | 'admin' | 'manager' }
     }>(`${apiBase}/auth/me`, {
       headers: {
         cookie: cookieHeader

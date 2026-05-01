@@ -124,7 +124,7 @@
 <script setup lang="ts">
 import type { OrgKnowledgeItem } from '@pm-agents/shared'
 
-definePageMeta({ middleware: 'auth' })
+definePageMeta({ middleware: ['auth', 'superadmin'] })
 
 const config = useRuntimeConfig()
 const base = config.public.apiBase

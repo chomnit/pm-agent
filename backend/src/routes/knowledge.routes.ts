@@ -9,12 +9,14 @@ import {
   uploadKnowledgeFile
 } from '../controllers/knowledge.controller'
 import { requireAuth } from '../middleware/auth.middleware'
+import { requireSuperAdmin } from '../middleware/role.middleware'
 import { asyncHandler } from '../utils/async-handler'
 
 const router = Router()
 const upload = multer({ storage: multer.memoryStorage() })
 
 router.use(requireAuth)
+router.use(requireSuperAdmin)
 
 router.get('/', asyncHandler(listKnowledge))
 router.post('/', asyncHandler(createKnowledge))

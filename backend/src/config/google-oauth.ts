@@ -11,6 +11,7 @@ type UserRow = RowDataPacket & {
   email: string
   name: string
   avatar_url: string | null
+  role: 'superadmin' | 'admin' | 'manager'
 }
 
 const findOrCreateGoogleUser = async (profile: Profile): Promise<Express.User> => {
@@ -24,22 +25,27 @@ const findOrCreateGoogleUser = async (profile: Profile): Promise<Express.User> =
   }
 
   const [existingRows] = await pool.query<UserRow[]>(
-    'SELECT id, email, name, avatar_url FROM users WHERE google_id = ? LIMIT 1',
+    'SELECT id, email, name, avatar_url, role FROM users WHERE google_id = ? LIMIT 1',
     [googleId]
   )
 
   if (existingRows.length > 0) {
     const existing = existingRows[0]
+    await pool.query(
+      'UPDATE users SET avatar_url = ?, name = ? WHERE id = ?',
+      [avatarUrl, name, existing.id]
+    )
     return {
       id: existing.id,
       email: existing.email,
-      name: existing.name,
-      avatarUrl: existing.avatar_url
+      name,
+      avatarUrl,
+      role: existing.role
     }
   }
 
   const [emailRows] = await pool.query<UserRow[]>(
-    'SELECT id, email, name, avatar_url FROM users WHERE email = ? LIMIT 1',
+    'SELECT id, email, name, avatar_url, role FROM users WHERE email = ? LIMIT 1',
     [email]
   )
 
@@ -51,26 +57,24 @@ const findOrCreateGoogleUser = async (profile: Profile): Promise<Express.User> =
       name,
       user.id
     ])
-
     return {
       id: user.id,
       email,
       name,
-      avatarUrl
+      avatarUrl,
+      role: user.role
     }
   }
 
-  const [insertResult] = await pool.query('INSERT INTO users (google_id, email, name, avatar_url) VALUES (?, ?, ?, ?)', [
-    googleId,
-    email,
-    name,
-    avatarUrl
-  ])
+  const [insertResult] = await pool.query(
+    'INSERT INTO users (google_id, email, name, avatar_url) VALUES (?, ?, ?, ?)',
+    [googleId, email, name, avatarUrl]
+  )
 
   const insertedId = (insertResult as { insertId?: number }).insertId
   if (insertedId) {
     const [newRows] = await pool.query<UserRow[]>(
-      'SELECT id, email, name, avatar_url FROM users WHERE id = ? LIMIT 1',
+      'SELECT id, email, name, avatar_url, role FROM users WHERE id = ? LIMIT 1',
       [insertedId]
     )
     if (newRows.length > 0) {
@@ -79,13 +83,14 @@ const findOrCreateGoogleUser = async (profile: Profile): Promise<Express.User> =
         id: newUser.id,
         email: newUser.email,
         name: newUser.name,
-        avatarUrl: newUser.avatar_url
+        avatarUrl: newUser.avatar_url,
+        role: newUser.role
       }
     }
   }
 
   const [fallbackRows] = await pool.query<UserRow[]>(
-    'SELECT id, email, name, avatar_url FROM users WHERE google_id = ? LIMIT 1',
+    'SELECT id, email, name, avatar_url, role FROM users WHERE google_id = ? LIMIT 1',
     [googleId]
   )
 
@@ -98,7 +103,8 @@ const findOrCreateGoogleUser = async (profile: Profile): Promise<Express.User> =
     id: fallback.id,
     email: fallback.email,
     name: fallback.name,
-    avatarUrl: fallback.avatar_url
+    avatarUrl: fallback.avatar_url,
+    role: fallback.role
   }
 }
 
@@ -135,7 +141,7 @@ passport.serializeUser((user, done) => {
 passport.deserializeUser(async (id: string, done) => {
   try {
     const [rows] = await pool.query<UserRow[]>(
-      'SELECT id, email, name, avatar_url FROM users WHERE id = ? LIMIT 1',
+      'SELECT id, email, name, avatar_url, role FROM users WHERE id = ? LIMIT 1',
       [id]
     )
 
@@ -148,7 +154,8 @@ passport.deserializeUser(async (id: string, done) => {
       id: user.id,
       email: user.email,
       name: user.name,
-      avatarUrl: user.avatar_url
+      avatarUrl: user.avatar_url,
+      role: user.role
     })
   } catch (error) {
     done(error as Error)

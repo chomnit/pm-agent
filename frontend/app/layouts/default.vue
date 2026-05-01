@@ -35,6 +35,7 @@
           <span v-if="sidebarOpen">Projects</span>
         </NuxtLink>
         <NuxtLink
+          v-if="(sessionUser as any)?.role === 'superadmin'"
           to="/knowledge"
           class="flex items-center gap-3 px-2.5 py-2 rounded-lg text-sm transition-colors"
           :class="[
@@ -58,38 +59,31 @@
           <Icon name="heroicons:paper-airplane" class="w-4 h-4 flex-shrink-0" />
           <span v-if="sidebarOpen">Telegram</span>
         </NuxtLink>
-        <NuxtLink
-          to="/settings"
-          class="flex items-center gap-3 px-2.5 py-2 rounded-lg text-sm transition-colors"
-          :class="[
-            isActive('/settings') ? 'bg-white/10 text-white' : 'text-gray-400 hover:text-white hover:bg-white/5',
-            !sidebarOpen && 'justify-center'
-          ]"
-          :title="!sidebarOpen ? 'Settings' : undefined"
-        >
-          <Icon name="heroicons:cog-6-tooth" class="w-4 h-4 flex-shrink-0" />
-          <span v-if="sidebarOpen">Settings</span>
-        </NuxtLink>
       </nav>
 
       <!-- Bottom -->
       <div class="px-2 py-4 border-t border-white/10 space-y-1">
-        <div v-if="sessionUser" class="flex items-center gap-3 px-2.5 py-2" :class="!sidebarOpen && 'justify-center px-0'">
+        <NuxtLink
+          v-if="sessionUser"
+          to="/settings"
+          class="flex items-center gap-3 px-2.5 py-2 rounded-lg transition-colors hover:bg-white/5"
+          :class="!sidebarOpen && 'justify-center px-0'"
+          :title="!sidebarOpen ? `${sessionUser.name} — Settings` : 'Settings'"
+        >
           <img
             v-if="sessionUser.avatarUrl"
             :src="sessionUser.avatarUrl"
             :alt="sessionUser.name"
-            class="w-7 h-7 rounded-full flex-shrink-0 object-cover"
-            :title="!sidebarOpen ? sessionUser.name : undefined"
+            class="w-7 h-7 rounded-full flex-shrink-0 object-cover ring-2 ring-transparent hover:ring-white/20 transition-all"
           />
-          <div v-else class="w-7 h-7 rounded-full bg-violet-600 flex items-center justify-center flex-shrink-0" :title="!sidebarOpen ? sessionUser.name : undefined">
+          <div v-else class="w-7 h-7 rounded-full bg-violet-600 flex items-center justify-center flex-shrink-0">
             <span class="text-xs font-medium text-white">{{ sessionUser.name[0] }}</span>
           </div>
           <div v-if="sidebarOpen" class="flex-1 min-w-0">
             <p class="text-xs text-white truncate font-medium">{{ sessionUser.name }}</p>
             <p class="text-xs text-gray-500 truncate">{{ sessionUser.email }}</p>
           </div>
-        </div>
+        </NuxtLink>
         <button
           class="w-full flex items-center gap-3 px-2.5 py-2 rounded-lg text-sm text-gray-400 hover:text-white hover:bg-white/5 transition-colors"
           :class="!sidebarOpen && 'justify-center'"

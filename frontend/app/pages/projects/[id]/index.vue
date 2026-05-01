@@ -21,14 +21,23 @@
           <Icon name="heroicons:plus" class="w-4 h-4" />
           New Ticket
         </button>
-        <button
-          v-if="activeTab === 'knowledge'"
-          class="flex items-center gap-2 px-4 py-2 rounded-lg bg-violet-600 text-white text-sm font-medium hover:bg-violet-700 transition-colors"
-          @click="navigateTo(`/projects/${projectId}/knowledge/new`)"
-        >
-          <Icon name="heroicons:plus" class="w-4 h-4" />
-          Add Feature
-        </button>
+        <div v-if="activeTab === 'knowledge'" class="flex items-center gap-2">
+          <button
+            class="flex items-center gap-2 px-4 py-2 rounded-lg border text-sm font-medium transition-colors hover:bg-gray-50"
+            style="border-color: var(--color-border); color: var(--color-text)"
+            @click="navigateTo(`/projects/${projectId}/knowledge/sync`)"
+          >
+            <Icon name="heroicons:arrow-path" class="w-4 h-4" />
+            Sync from Jira
+          </button>
+          <button
+            class="flex items-center gap-2 px-4 py-2 rounded-lg bg-violet-600 text-white text-sm font-medium hover:bg-violet-700 transition-colors"
+            @click="navigateTo(`/projects/${projectId}/knowledge/new`)"
+          >
+            <Icon name="heroicons:plus" class="w-4 h-4" />
+            Add Feature
+          </button>
+        </div>
         <button
           v-if="activeTab === 'members' && isOwner"
           class="flex items-center gap-2 px-4 py-2 rounded-lg bg-violet-600 text-white text-sm font-medium hover:bg-violet-700 transition-colors"
@@ -151,6 +160,31 @@
           </NuxtLink>
         </div>
 
+        <!-- Search + filter bar -->
+        <div v-if="!loadingFeatures && features.length > 0" class="flex flex-col sm:flex-row gap-3 mb-5">
+          <div class="relative flex-1">
+            <Icon name="heroicons:magnifying-glass" class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4" style="color: var(--color-muted)" />
+            <input
+              v-model="featureSearch"
+              type="text"
+              placeholder="Search features..."
+              class="w-full pl-9 pr-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-violet-500"
+              style="border-color: var(--color-border); background: var(--color-card); color: var(--color-text)"
+            />
+          </div>
+          <div class="flex gap-1.5">
+            <button
+              v-for="f in featureStatusFilters"
+              :key="f.value"
+              class="px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors"
+              :class="featureStatusFilter === f.value ? f.activeClass : 'border-gray-200 text-gray-500 bg-white hover:border-gray-300'"
+              @click="featureStatusFilter = f.value"
+            >
+              {{ f.label }}
+            </button>
+          </div>
+        </div>
+
         <!-- Features -->
         <div v-if="loadingFeatures" class="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div v-for="n in 4" :key="n" class="rounded-xl border p-5 animate-pulse" style="background: var(--color-card); border-color: var(--color-border)">
@@ -172,27 +206,47 @@
             Add first feature
           </button>
         </div>
-        <div v-else class="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <NuxtLink
-            v-for="feature in features"
-            :key="feature.id"
-            :to="`/projects/${projectId}/knowledge/${feature.id}`"
-            class="rounded-xl border p-5 transition-all duration-200 hover:shadow-md hover:-translate-y-0.5"
-            style="background: var(--color-card); border-color: var(--color-border)"
-          >
-            <div class="flex items-start justify-between mb-2">
-              <p class="font-medium text-sm" style="color: var(--color-text)">{{ feature.name }}</p>
-              <span class="text-xs font-medium px-2 py-0.5 rounded-full ml-2 flex-shrink-0" :class="featureStatusClass(feature.status)">
-                {{ feature.status.replace('_', ' ') }}
-              </span>
+        <template v-else>
+          <div v-if="filteredFeatures.length === 0" class="flex flex-col items-center justify-center py-16 text-center">
+            <div class="w-12 h-12 rounded-xl bg-gray-100 flex items-center justify-center mb-3">
+              <Icon name="heroicons:magnifying-glass" class="w-6 h-6 text-gray-400" />
             </div>
-            <p class="text-xs mb-2" style="color: var(--color-muted)">{{ feature.category }}</p>
-            <p class="text-sm line-clamp-2" style="color: var(--color-muted)">{{ feature.description }}</p>
-            <div v-if="feature.tags?.length" class="flex flex-wrap gap-1 mt-3">
-              <span v-for="tag in feature.tags.slice(0, 4)" :key="tag" class="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-500">{{ tag }}</span>
-            </div>
-          </NuxtLink>
-        </div>
+            <h3 class="font-medium mb-1" style="color: var(--color-text)">No features match</h3>
+            <p class="text-sm" style="color: var(--color-muted)">Try adjusting your search or filter</p>
+          </div>
+          <div v-else class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <NuxtLink
+              v-for="feature in filteredFeatures"
+              :key="feature.id"
+              :to="`/projects/${projectId}/knowledge/${feature.id}`"
+              class="rounded-xl border p-5 transition-all duration-200 hover:shadow-md hover:-translate-y-0.5"
+              style="background: var(--color-card); border-color: var(--color-border)"
+            >
+              <div class="flex items-start justify-between mb-1.5">
+                <p class="font-medium text-sm" style="color: var(--color-text)">{{ feature.name }}</p>
+                <span class="text-xs font-medium px-2 py-0.5 rounded-full ml-2 flex-shrink-0" :class="featureStatusClass(feature.status)">
+                  {{ feature.status === 'in_development' ? 'In Dev' : feature.status === 'live' ? 'Live' : 'Deprecated' }}
+                </span>
+              </div>
+              <p class="text-xs mb-2" style="color: var(--color-muted)">{{ feature.category }}</p>
+              <p class="text-sm line-clamp-2 mb-3" style="color: var(--color-muted)">{{ feature.description }}</p>
+              <!-- User roles -->
+              <div v-if="feature.userRoles?.length" class="flex flex-wrap gap-1 mb-1.5">
+                <span v-for="role in feature.userRoles.slice(0, 2)" :key="role" class="text-xs px-2 py-0.5 rounded-full bg-violet-100 text-violet-700">{{ role }}</span>
+                <span v-if="feature.userRoles.length > 2" class="text-xs px-2 py-0.5 rounded-full bg-violet-100 text-violet-500">+{{ feature.userRoles.length - 2 }}</span>
+              </div>
+              <!-- Integrations -->
+              <div v-if="feature.integrations?.length" class="flex flex-wrap gap-1 mb-1.5">
+                <span v-for="item in feature.integrations.slice(0, 3)" :key="item" class="text-xs px-2 py-0.5 rounded-full bg-blue-100 text-blue-700">{{ item }}</span>
+                <span v-if="feature.integrations.length > 3" class="text-xs px-2 py-0.5 rounded-full bg-blue-100 text-blue-500">+{{ feature.integrations.length - 3 }}</span>
+              </div>
+              <!-- Tags -->
+              <div v-if="feature.tags?.length" class="flex flex-wrap gap-1">
+                <span v-for="tag in feature.tags.slice(0, 4)" :key="tag" class="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-500">{{ tag }}</span>
+              </div>
+            </NuxtLink>
+          </div>
+        </template>
       </div>
 
       <!-- MEMBERS TAB -->
@@ -340,6 +394,31 @@ const ticketForm = reactive({ title: '', description: '', priority: 'medium' })
 const features = ref<ProjectFeature[]>([])
 const loadingFeatures = ref(false)
 const orgKnowledgeCount = ref(0)
+const featureSearch = ref('')
+const featureStatusFilter = ref('all')
+
+const featureStatusFilters = [
+  { value: 'all', label: 'All', activeClass: 'border-violet-300 bg-violet-50 text-violet-700' },
+  { value: 'live', label: 'Live', activeClass: 'border-emerald-300 bg-emerald-50 text-emerald-700' },
+  { value: 'in_development', label: 'In Dev', activeClass: 'border-blue-300 bg-blue-50 text-blue-700' },
+  { value: 'deprecated', label: 'Deprecated', activeClass: 'border-gray-300 bg-gray-100 text-gray-600' }
+]
+
+const filteredFeatures = computed(() => {
+  let list = features.value
+  if (featureStatusFilter.value !== 'all') {
+    list = list.filter(f => f.status === featureStatusFilter.value)
+  }
+  const q = featureSearch.value.trim().toLowerCase()
+  if (q) {
+    list = list.filter(f =>
+      f.name.toLowerCase().includes(q) ||
+      f.category.toLowerCase().includes(q) ||
+      f.description.toLowerCase().includes(q)
+    )
+  }
+  return list
+})
 
 // Members
 const members = ref<ProjectMember[]>([])
